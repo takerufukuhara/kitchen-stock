@@ -5,13 +5,22 @@ import cors from "cors";
 import { createClient } from "@supabase/supabase-js";
 
 const app = express();
-app.use(cors());
+
+const allowedOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(",").map((origin) => origin.trim())
+  : true;
+
+app.use(cors({ origin: allowedOrigins }));
 app.use(express.json());
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
+
+app.get("/health", (_req, res) => {
+  res.json({ ok: true });
+});
 
 app.get("/items", async (_req, res) => {
   try {
