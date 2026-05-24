@@ -7,7 +7,7 @@ export type Item = {
   created_at?: string;
 };
 
-const API = import.meta.env.VITE_API_URL;
+const API = import.meta.env.VITE_API_URL?.replace(/\/+$/, "");
 
 /**
  * items一覧（current_stock付き）を取得

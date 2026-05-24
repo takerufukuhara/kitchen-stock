@@ -1,4 +1,4 @@
-const API = import.meta.env.VITE_API_URL;
+const API = import.meta.env.VITE_API_URL?.replace(/\/+$/, "");
 
 export async function createStockMovement(params: {
   item_id: string;
@@ -31,7 +31,7 @@ export async function fetchStockMovements(params: {
   item_id: string;
   limit?: number;
 }): Promise<StockMovement[]> {
-  const API = import.meta.env.VITE_API_URL;
+  const API = import.meta.env.VITE_API_URL?.replace(/\/+$/, "");
   if (!API) throw new Error("VITE_API_URL が未設定です");
 
   const limit = params.limit ?? 50;
@@ -49,7 +49,7 @@ export async function fetchStockMovements(params: {
 }
 
 export async function deleteStockMovement(id: string): Promise<void> {
-  const API = import.meta.env.VITE_API_URL;
+  const API = import.meta.env.VITE_API_URL?.replace(/\/+$/, "");
   if (!API) throw new Error("VITE_API_URL が未設定です");
 
   const res = await fetch(`${API}/stock-movements/${id}`, {
@@ -61,4 +61,3 @@ export async function deleteStockMovement(id: string): Promise<void> {
     throw new Error(text || `deleteStockMovement failed: ${res.status}`);
   }
 }
-
