@@ -51,12 +51,9 @@ const [editUnit, setEditUnit] = useState("");
 const [editCategory, setEditCategory] = useState("");
 const [editPar, setEditPar] = useState<string>(""); // 入力欄は文字列で持つのが安全
 
-const [query, setQuery] = useState("");
 const [categoryFilter, setCategoryFilter] = useState("");
 const [onlyLow, setOnlyLow] = useState(false);
-const [sortKey, setSortKey] = useState<"name" | "stock" | "created_at">("name");
-const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
-const [activeTab, setActiveTab] = useState<"dashboard" | "inventory" | "orders">("dashboard");
+const [activeTab, setActiveTab] = useState<"low-stock" | "waste" | "inventory" | "orders">("low-stock");
 
 
 
@@ -166,9 +163,42 @@ const cancelEdit = () => {
 
   const getCategoryLabel = (item: Item) => item.category?.trim() || "未分類";
 
+  const categoryOrder = [
+    "野菜",
+    "果物",
+    "肉",
+    "魚",
+    "魚介",
+    "海藻",
+    "乾物",
+    "米",
+    "麺",
+    "粉物",
+    "乳製品",
+    "卵",
+    "調味料",
+    "ソース",
+    "油",
+    "冷凍",
+    "ドリンク",
+    "消耗品",
+  ];
+
+  const getCategoryOrder = (category: string) => {
+    if (category === "その他") return 998;
+    if (category === "未分類") return 999;
+
+    const index = categoryOrder.findIndex((name) => category.includes(name));
+    return index === -1 ? 900 : index;
+  };
+
   const categories = Array.from(
     new Set(items.map((item) => getCategoryLabel(item)))
-  ).sort((a, b) => a.localeCompare(b, "ja"));
+  ).sort((a, b) => {
+    const orderDiff = getCategoryOrder(a) - getCategoryOrder(b);
+    if (orderDiff !== 0) return orderDiff;
+    return a.localeCompare(b, "ja");
+  });
 
   const categorySummaries = categories
     .map((category) => {
@@ -192,7 +222,8 @@ const cancelEdit = () => {
       };
     })
     .sort((a, b) => {
-      if (b.lowCount !== a.lowCount) return b.lowCount - a.lowCount;
+      const orderDiff = getCategoryOrder(a.category) - getCategoryOrder(b.category);
+      if (orderDiff !== 0) return orderDiff;
       return a.category.localeCompare(b.category, "ja");
     });
 
@@ -343,7 +374,6 @@ const cancelEdit = () => {
   };
 
   const visibleItems = items
-  .filter((it) => it.name.toLowerCase().includes(query.trim().toLowerCase()))
   .filter((it) => {
     if (!categoryFilter) return true;
     return getCategoryLabel(it) === categoryFilter;
@@ -355,20 +385,7 @@ const cancelEdit = () => {
   })
   .slice()
   .sort((a, b) => {
-    const dir = sortDir === "asc" ? 1 : -1;
-
-    if (sortKey === "name") {
-      return a.name.localeCompare(b.name, "ja") * dir;
-    }
-
-    if (sortKey === "stock") {
-      return (a.current_stock - b.current_stock) * dir;
-    }
-
-    // created_at は無い場合もあるので安全に
-    const at = a.created_at ? Date.parse(a.created_at) : 0;
-    const bt = b.created_at ? Date.parse(b.created_at) : 0;
-    return (at - bt) * dir;
+    return a.name.localeCompare(b.name, "ja");
   });
 
   const thStyle: React.CSSProperties = {
@@ -465,10 +482,16 @@ const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
         }}
       >
         <button
-          onClick={() => setActiveTab("dashboard")}
-          style={tabButtonStyle(activeTab === "dashboard")}
+          onClick={() => setActiveTab("low-stock")}
+          style={tabButtonStyle(activeTab === "low-stock")}
         >
-          ダッシュボード
+          低在庫
+        </button>
+        <button
+          onClick={() => setActiveTab("waste")}
+          style={tabButtonStyle(activeTab === "waste")}
+        >
+          廃棄分析
         </button>
         <button
           onClick={() => setActiveTab("inventory")}
@@ -484,7 +507,7 @@ const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
         </button>
       </nav>
 
-      {activeTab === "dashboard" && (
+      {activeTab === "low-stock" && (
       <>
       <div
         style={{
@@ -494,58 +517,6 @@ const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
           alignItems: "start",
         }}
       >
-        <section style={{ ...sectionStyle, marginTop: 0 }}>
-          <h2 style={{ margin: "0 0 12px" }}>カテゴリ別まとめ</h2>
-
-          {categorySummaries.length === 0 ? (
-            <p style={{ margin: 0 }}>カテゴリはまだありません</p>
-          ) : (
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-                gap: 12,
-              }}
-            >
-              {categorySummaries.map((summary) => {
-                const selected = categoryFilter === summary.category;
-
-                return (
-                  <button
-                    key={summary.category}
-                    onClick={() =>
-                      setCategoryFilter(selected ? "" : summary.category)
-                    }
-                    style={{
-                      ...buttonStyle,
-                      textAlign: "left",
-                      padding: 12,
-                      borderRadius: 8,
-                      border: selected ? "2px solid #2563eb" : "1px solid #ddd",
-                      background: selected ? "#eff6ff" : "#fff",
-                      cursor: "pointer",
-                    }}
-                  >
-                    <strong>{summary.category}</strong>
-                    <div style={{ marginTop: 8, fontSize: 14 }}>
-                      商品数: {summary.itemCount}
-                    </div>
-                    <div style={{ fontSize: 14 }}>
-                      低在庫:{" "}
-                      <span style={{ color: summary.lowCount > 0 ? "red" : "#333" }}>
-                        {summary.lowCount}
-                      </span>
-                    </div>
-                    <div style={{ fontSize: 14 }}>
-                      合計在庫: {summary.totalStock}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </section>
-
         <section
           style={{
             ...sectionStyle,
@@ -815,7 +786,7 @@ const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
       </section>
       )}
 
-      {activeTab === "dashboard" && (
+      {activeTab === "waste" && (
       <section style={sectionStyle}>
         <h2 style={{ margin: "0 0 12px" }}>廃棄分析</h2>
 
@@ -882,6 +853,58 @@ const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
 
       {activeTab === "inventory" && (
       <>
+        <section style={{ ...sectionStyle, marginTop: 0 }}>
+          <h2 style={{ margin: "0 0 12px" }}>カテゴリ別まとめ</h2>
+
+          {categorySummaries.length === 0 ? (
+            <p style={{ margin: 0 }}>カテゴリはまだありません</p>
+          ) : (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+                gap: 12,
+              }}
+            >
+              {categorySummaries.map((summary) => {
+                const selected = categoryFilter === summary.category;
+
+                return (
+                  <button
+                    key={summary.category}
+                    onClick={() =>
+                      setCategoryFilter(selected ? "" : summary.category)
+                    }
+                    style={{
+                      ...buttonStyle,
+                      textAlign: "left",
+                      padding: 12,
+                      borderRadius: 8,
+                      border: selected ? "2px solid #2563eb" : "1px solid #ddd",
+                      background: selected ? "#eff6ff" : "#fff",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <strong>{summary.category}</strong>
+                    <div style={{ marginTop: 8, fontSize: 14 }}>
+                      商品数: {summary.itemCount}
+                    </div>
+                    <div style={{ fontSize: 14 }}>
+                      低在庫:{" "}
+                      <span style={{ color: summary.lowCount > 0 ? "red" : "#333" }}>
+                        {summary.lowCount}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 14 }}>
+                      合計在庫: {summary.totalStock}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
       <section style={sectionStyle}>
         <h2 style={{ margin: "0 0 12px" }}>商品追加</h2>
 
@@ -945,68 +968,24 @@ const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
         </div>
       </section>
 
-      <section style={sectionStyle}>
-        <h2 style={{ margin: "0 0 12px" }}>表示条件</h2>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 12,
+          marginTop: 16,
+        }}
+      >
+        <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <input
+            type="checkbox"
+            checked={onlyLow}
+            onChange={(e) => setOnlyLow(e.target.checked)}
+          />
+          低在庫のみ
+        </label>
 
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 8,
-            alignItems: "center",
-          }}
-        >
-  <input
-    placeholder="検索（商品名）"
-    value={query}
-    onChange={(e) => setQuery(e.target.value)}
-    style={inputStyle}
-  />
-
-  <label style={{ marginRight: 12 }}>
-    <input
-      type="checkbox"
-      checked={onlyLow}
-      onChange={(e) => setOnlyLow(e.target.checked)}
-    />{" "}
-    低在庫のみ
-  </label>
-
-  <select
-    value={categoryFilter}
-    onChange={(e) => setCategoryFilter(e.target.value)}
-    style={inputStyle}
-  >
-    <option value="">全カテゴリ</option>
-    {categories.map((category) => (
-      <option key={category} value={category}>
-        {category}
-      </option>
-    ))}
-  </select>
-
-  <select
-    value={sortKey}
-    onChange={(e) => setSortKey(e.target.value as "name" | "stock" | "created_at")}
-    style={inputStyle}
-  >
-    <option value="name">名前</option>
-    <option value="stock">在庫</option>
-    <option value="created_at">作成日</option>
-  </select>
-
-  <select
-    value={sortDir}
-    onChange={(e) => setSortDir(e.target.value as "asc" | "desc")}
-    style={inputStyle}
-  >
-    <option value="asc">昇順</option>
-    <option value="desc">降順</option>
-  </select>
-        </div>
-      </section>
-
-      <div style={{ marginTop: 16 }}>
         <button onClick={loadItems} disabled={loading}>
           更新
         </button>
