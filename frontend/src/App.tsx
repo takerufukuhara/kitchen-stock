@@ -1,6 +1,18 @@
 import { useEffect, useState } from "react";
 import { fetchItems, type Item, createItem,deleteItem,updateItem } from "./api/items";
-import { createStockMovement, fetchStockMovements, deleteStockMovement, type StockMovement } from "./api/stockMovements";
+import { createStockMovement, fetchStockMovements, deleteStockMovement, fetchWasteSummary, type StockMovement, type WasteSummary } from "./api/stockMovements";
+import {
+  addRecipe,
+  completeOrder,
+  createMenuItem,
+  createOrder,
+  deleteRecipe,
+  fetchMenuItems,
+  fetchOrders,
+  getJoinedName,
+  type MenuItem,
+  type Order,
+} from "./api/orders";
 
 
 export default function App() {
@@ -11,6 +23,7 @@ export default function App() {
 
   // ✅ 追加：商品ごとの数量入力を保持（key=item.id, value=入力文字列）
   const [qtyById, setQtyById] = useState<Record<string, string>>({});
+  const [reasonById, setReasonById] = useState<Record<string, string>>({});
 
   // 既に作っている商品追加フォーム用（あるならそのまま）
   const [newName, setNewName] = useState("");
@@ -21,6 +34,16 @@ export default function App() {
   const [openHistoryItemId, setOpenHistoryItemId] = useState<string | null>(null);
   const [history, setHistory] = useState<StockMovement[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [wasteSummaries, setWasteSummaries] = useState<WasteSummary[]>([]);
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
+
+  const [newMenuName, setNewMenuName] = useState("");
+  const [recipeMenuId, setRecipeMenuId] = useState("");
+  const [recipeItemId, setRecipeItemId] = useState("");
+  const [recipeQuantity, setRecipeQuantity] = useState("1");
+  const [orderMenuId, setOrderMenuId] = useState("");
+  const [orderQuantity, setOrderQuantity] = useState("1");
 
   const [editingId, setEditingId] = useState<string | null>(null);
 const [editName, setEditName] = useState("");
@@ -72,14 +95,39 @@ const cancelEdit = () => {
     try {
       setLoading(true);
       setError(null);
-      const data = await fetchItems();
+      const [data, wasteData, menuData, orderData] = await Promise.all([
+        fetchItems(),
+        fetchWasteSummary(),
+        fetchMenuItems(),
+        fetchOrders(),
+      ]);
       setItems(data);
+      setWasteSummaries(wasteData);
+      setMenuItems(menuData);
+      setOrders(orderData);
+
+      if (!recipeMenuId && menuData.length > 0) {
+        setRecipeMenuId(menuData[0].id);
+      }
+      if (!recipeItemId && data.length > 0) {
+        setRecipeItemId(data[0].id);
+      }
+      if (!orderMenuId && menuData.length > 0) {
+        setOrderMenuId(menuData[0].id);
+      }
 
       // ✅ 追加：新しく出てきたitemに数量初期値を入れておく（空欄→"1"）
       setQtyById((prev) => {
         const next = { ...prev };
         for (const it of data) {
           if (next[it.id] === undefined) next[it.id] = "1";
+        }
+        return next;
+      });
+      setReasonById((prev) => {
+        const next = { ...prev };
+        for (const it of data) {
+          if (next[it.id] === undefined) next[it.id] = "使用";
         }
         return next;
       });
@@ -90,10 +138,10 @@ const cancelEdit = () => {
     }
   };
 
-  const moveStock = async (itemId: string, delta: number) => {
+  const moveStock = async (itemId: string, delta: number, reason: string) => {
     try {
       setError(null);
-      await createStockMovement({ item_id: itemId, delta });
+      await createStockMovement({ item_id: itemId, delta, reason });
       await loadItems();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -111,7 +159,8 @@ const cancelEdit = () => {
       return;
     }
 
-    await moveStock(itemId, sign * qty);
+    const reason = sign === 1 ? "仕入れ" : reasonById[itemId] ?? "使用";
+    await moveStock(itemId, sign * qty, reason);
   };
 
   useEffect(() => {
@@ -189,6 +238,94 @@ const cancelEdit = () => {
       setCopyMessage("発注リストをコピーしました");
     } catch (e) {
       setCopyMessage("コピーに失敗しました");
+    }
+  };
+
+  const totalWasteQty = wasteSummaries.reduce(
+    (sum, item) => sum + item.waste_qty,
+    0
+  );
+
+  const applySuggestedParLevel = async (summary: WasteSummary) => {
+    if (summary.suggested_par_level === null) return;
+
+    try {
+      setError(null);
+      await updateItem(summary.item_id, {
+        par_level: summary.suggested_par_level,
+      });
+      await loadItems();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const pendingOrders = orders.filter((order) => order.status !== "完了");
+
+  const addMenu = async () => {
+    const name = newMenuName.trim();
+    if (!name) {
+      setError("メニュー名を入力してください");
+      return;
+    }
+
+    try {
+      setError(null);
+      const created = await createMenuItem(name);
+      setNewMenuName("");
+      setRecipeMenuId(created.id);
+      setOrderMenuId(created.id);
+      await loadItems();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const addRecipeItem = async () => {
+    const quantity = Number(recipeQuantity);
+    if (!recipeMenuId || !recipeItemId || !Number.isFinite(quantity) || quantity <= 0) {
+      setError("メニュー、食材、1以上の使用量を入力してください");
+      return;
+    }
+
+    try {
+      setError(null);
+      await addRecipe({
+        menu_item_id: recipeMenuId,
+        item_id: recipeItemId,
+        quantity,
+      });
+      setRecipeQuantity("1");
+      await loadItems();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const addOrder = async () => {
+    const quantity = Number(orderQuantity);
+    if (!orderMenuId || !Number.isFinite(quantity) || quantity <= 0) {
+      setError("メニューと1以上の注文数を入力してください");
+      return;
+    }
+
+    try {
+      setError(null);
+      await createOrder({ menu_item_id: orderMenuId, quantity });
+      setOrderQuantity("1");
+      await loadItems();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const finishOrder = async (orderId: string) => {
+    try {
+      setError(null);
+      await completeOrder(orderId);
+      await loadItems();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -398,6 +535,238 @@ const inputStyle: React.CSSProperties = {
           )}
         </section>
       </div>
+
+      <section style={sectionStyle}>
+        <h2 style={{ margin: "0 0 12px" }}>注文管理</h2>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+            gap: 16,
+            alignItems: "start",
+          }}
+        >
+          <div>
+            <h3 style={{ margin: "0 0 8px", fontSize: 16 }}>メニュー登録</h3>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                placeholder="メニュー名（例：唐揚げ定食）"
+                value={newMenuName}
+                onChange={(e) => setNewMenuName(e.target.value)}
+                style={{ ...inputStyle, flex: 1 }}
+              />
+              <button onClick={addMenu} disabled={loading}>
+                追加
+              </button>
+            </div>
+
+            <h3 style={{ margin: "16px 0 8px", fontSize: 16 }}>レシピ登録</h3>
+            <div style={{ display: "grid", gap: 8 }}>
+              <select
+                value={recipeMenuId}
+                onChange={(e) => setRecipeMenuId(e.target.value)}
+                style={inputStyle}
+              >
+                <option value="">メニューを選択</option>
+                {menuItems.map((menu) => (
+                  <option key={menu.id} value={menu.id}>
+                    {menu.name}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={recipeItemId}
+                onChange={(e) => setRecipeItemId(e.target.value)}
+                style={inputStyle}
+              >
+                <option value="">食材を選択</option>
+                {items.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}（{item.unit}）
+                  </option>
+                ))}
+              </select>
+
+              <input
+                placeholder="1個あたりの使用量"
+                value={recipeQuantity}
+                onChange={(e) => setRecipeQuantity(e.target.value)}
+                style={inputStyle}
+              />
+
+              <button onClick={addRecipeItem} disabled={loading}>
+                レシピに追加
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <h3 style={{ margin: "0 0 8px", fontSize: 16 }}>注文追加</h3>
+            <div style={{ display: "grid", gap: 8 }}>
+              <select
+                value={orderMenuId}
+                onChange={(e) => setOrderMenuId(e.target.value)}
+                style={inputStyle}
+              >
+                <option value="">メニューを選択</option>
+                {menuItems.map((menu) => (
+                  <option key={menu.id} value={menu.id}>
+                    {menu.name}
+                  </option>
+                ))}
+              </select>
+
+              <input
+                placeholder="注文数"
+                value={orderQuantity}
+                onChange={(e) => setOrderQuantity(e.target.value)}
+                style={inputStyle}
+              />
+
+              <button onClick={addOrder} disabled={loading}>
+                注文を追加
+              </button>
+            </div>
+
+            <h3 style={{ margin: "16px 0 8px", fontSize: 16 }}>注文中</h3>
+            {pendingOrders.length === 0 ? (
+              <p style={{ margin: 0 }}>注文中の商品はありません</p>
+            ) : (
+              <ul style={{ margin: 0, paddingLeft: 20 }}>
+                {pendingOrders.map((order) => (
+                  <li key={order.id} style={{ marginBottom: 8 }}>
+                    {getJoinedName(order.menu_items)} × {order.quantity}
+                    <button
+                      onClick={() => finishOrder(order.id)}
+                      disabled={loading}
+                      style={{ marginLeft: 8 }}
+                    >
+                      完了して出庫
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+
+        {menuItems.length > 0 && (
+          <div style={{ marginTop: 16 }}>
+            <h3 style={{ margin: "0 0 8px", fontSize: 16 }}>登録済みレシピ</h3>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                gap: 12,
+              }}
+            >
+              {menuItems.map((menu) => (
+                <div
+                  key={menu.id}
+                  style={{
+                    padding: 12,
+                    borderRadius: 8,
+                    border: "1px solid #ddd",
+                  }}
+                >
+                  <strong>{menu.name}</strong>
+                  {menu.recipes.length === 0 ? (
+                    <p style={{ margin: "8px 0 0" }}>レシピ未登録</p>
+                  ) : (
+                    <ul style={{ margin: "8px 0 0", paddingLeft: 20 }}>
+                      {menu.recipes.map((recipe) => (
+                        <li key={recipe.id} style={{ marginBottom: 6 }}>
+                          {getJoinedName(recipe.items)}: {recipe.quantity}
+                          <button
+                            onClick={async () => {
+                              try {
+                                setError(null);
+                                await deleteRecipe(recipe.id);
+                                await loadItems();
+                              } catch (e) {
+                                setError(e instanceof Error ? e.message : String(e));
+                              }
+                            }}
+                            disabled={loading}
+                            style={{ marginLeft: 8 }}
+                          >
+                            削除
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section style={sectionStyle}>
+        <h2 style={{ margin: "0 0 12px" }}>廃棄分析</h2>
+
+        {wasteSummaries.length === 0 ? (
+          <p style={{ margin: 0 }}>廃棄として記録された商品はありません</p>
+        ) : (
+          <>
+            <p style={{ margin: "0 0 12px" }}>
+              累計廃棄数: {totalWasteQty}
+            </p>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                gap: 12,
+              }}
+            >
+              {wasteSummaries.map((summary) => {
+                const canApply =
+                  summary.suggested_par_level !== null &&
+                  summary.suggested_par_level !== summary.par_level;
+
+                return (
+                  <div
+                    key={summary.item_id}
+                    style={{
+                      padding: 12,
+                      borderRadius: 8,
+                      border: "1px solid #ddd",
+                      background: "#fff",
+                    }}
+                  >
+                    <strong>{summary.name}</strong>
+                    <div style={{ marginTop: 8, fontSize: 14 }}>
+                      カテゴリ: {summary.category || "未分類"}
+                    </div>
+                    <div style={{ fontSize: 14 }}>
+                      廃棄: {summary.waste_qty}
+                      {summary.unit} / {summary.waste_count}回
+                    </div>
+                    <div style={{ fontSize: 14 }}>
+                      現在の基準在庫: {summary.par_level ?? "未設定"}
+                    </div>
+                    <div style={{ fontSize: 14 }}>
+                      見直し案: {summary.suggested_par_level ?? "基準在庫未設定"}
+                    </div>
+
+                    <button
+                      onClick={() => applySuggestedParLevel(summary)}
+                      disabled={!canApply || loading}
+                      style={{ marginTop: 8 }}
+                    >
+                      見直し案を適用
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </section>
 
       <section style={sectionStyle}>
         <h2 style={{ margin: "0 0 12px" }}>商品追加</h2>
@@ -662,6 +1031,21 @@ const inputStyle: React.CSSProperties = {
                     style={{ width: 60, marginRight: 6 }}
                   />
 
+                  <select
+                    value={reasonById[item.id] ?? "使用"}
+                    onChange={(e) =>
+                      setReasonById((prev) => ({
+                        ...prev,
+                        [item.id]: e.target.value,
+                      }))
+                    }
+                    style={{ marginRight: 6 }}
+                  >
+                    <option value="使用">使用</option>
+                    <option value="廃棄">廃棄</option>
+                    <option value="棚卸し修正">棚卸し修正</option>
+                  </select>
+
                   <button
                     onClick={() => moveWithQty(item.id, 1)}
                     disabled={loading}
@@ -744,6 +1128,7 @@ const inputStyle: React.CSSProperties = {
                           {h.delta >= 0
                             ? `入庫 ${h.delta}${item.unit}`
                             : `出庫 ${Math.abs(h.delta)}${item.unit}`}
+                          {h.reason && ` / ${h.reason}`}
 
                           <button
                             style={{ marginLeft: 8 }}

@@ -3,6 +3,7 @@ const API = import.meta.env.VITE_API_URL?.replace(/\/+$/, "");
 export async function createStockMovement(params: {
   item_id: string;
   delta: number;
+  reason?: string | null;
 }) {
   if (!API) throw new Error("VITE_API_URL が未設定です");
 
@@ -24,7 +25,19 @@ export type StockMovement = {
   id: string;
   item_id: string;
   delta: number;
+  reason: string | null;
   created_at: string;
+};
+
+export type WasteSummary = {
+  item_id: string;
+  name: string;
+  unit: string;
+  category: string | null;
+  par_level: number | null;
+  waste_qty: number;
+  waste_count: number;
+  suggested_par_level: number | null;
 };
 
 export async function fetchStockMovements(params: {
@@ -60,4 +73,18 @@ export async function deleteStockMovement(id: string): Promise<void> {
     const text = await res.text();
     throw new Error(text || `deleteStockMovement failed: ${res.status}`);
   }
+}
+
+export async function fetchWasteSummary(): Promise<WasteSummary[]> {
+  const API = import.meta.env.VITE_API_URL?.replace(/\/+$/, "");
+  if (!API) throw new Error("VITE_API_URL が未設定です");
+
+  const res = await fetch(`${API}/waste-summary`);
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || `fetchWasteSummary failed: ${res.status}`);
+  }
+
+  return (await res.json()) as WasteSummary[];
 }
