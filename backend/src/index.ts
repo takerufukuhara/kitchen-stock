@@ -263,6 +263,24 @@ app.post("/menu-items", async (req, res) => {
   }
 });
 
+app.delete("/menu-items/:id", async (req, res) => {
+  try {
+    const menuItemId = req.params.id;
+
+    const { data, error } = await supabase
+      .from("menu_items")
+      .delete()
+      .eq("id", menuItemId)
+      .select()
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ deleted: data });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
 app.post("/menu-items/:id/recipes", async (req, res) => {
   try {
     const menuItemId = req.params.id;

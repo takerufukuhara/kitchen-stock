@@ -61,6 +61,10 @@ export async function createMenuItem(name: string): Promise<MenuItem> {
   });
 }
 
+export async function deleteMenuItem(id: string): Promise<void> {
+  await request(`/menu-items/${id}`, { method: "DELETE" });
+}
+
 export async function addRecipe(params: {
   menu_item_id: string;
   item_id: string;

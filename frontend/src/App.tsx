@@ -6,6 +6,7 @@ import {
   completeOrder,
   createMenuItem,
   createOrder,
+  deleteMenuItem,
   deleteRecipe,
   fetchMenuItems,
   fetchOrders,
@@ -55,6 +56,7 @@ const [categoryFilter, setCategoryFilter] = useState("");
 const [onlyLow, setOnlyLow] = useState(false);
 const [sortKey, setSortKey] = useState<"name" | "stock" | "created_at">("name");
 const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+const [activeTab, setActiveTab] = useState<"dashboard" | "inventory" | "orders">("dashboard");
 
 
 
@@ -297,6 +299,22 @@ const cancelEdit = () => {
     }
   };
 
+  const removeMenu = async (menu: MenuItem) => {
+    if (!confirm(`「${menu.name}」を削除しますか？（レシピも削除されます）`)) {
+      return;
+    }
+
+    try {
+      setError(null);
+      await deleteMenuItem(menu.id);
+      if (recipeMenuId === menu.id) setRecipeMenuId("");
+      if (orderMenuId === menu.id) setOrderMenuId("");
+      await loadItems();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   const addOrder = async () => {
     const quantity = Number(orderQuantity);
     if (!orderMenuId || !Number.isFinite(quantity) || quantity <= 0) {
@@ -387,6 +405,14 @@ const inputStyle: React.CSSProperties = {
   fontWeight: 500,
 };
 
+const fieldLabelStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 4,
+  color: "#111827",
+  fontSize: 14,
+  fontWeight: 700,
+};
+
 const buttonStyle: React.CSSProperties = {
   color: "#111827",
   backgroundColor: "#fff",
@@ -395,6 +421,14 @@ const buttonStyle: React.CSSProperties = {
   fontWeight: 600,
   cursor: "pointer",
 };
+
+const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
+  ...buttonStyle,
+  padding: "10px 14px",
+  borderColor: selected ? "#2563eb" : "#9ca3af",
+  backgroundColor: selected ? "#eff6ff" : "#fff",
+  color: "#111827",
+});
 
 
   return (
@@ -422,6 +456,36 @@ const buttonStyle: React.CSSProperties = {
 
       <h1>在庫一覧</h1>
 
+      <nav
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 8,
+          marginBottom: 16,
+        }}
+      >
+        <button
+          onClick={() => setActiveTab("dashboard")}
+          style={tabButtonStyle(activeTab === "dashboard")}
+        >
+          ダッシュボード
+        </button>
+        <button
+          onClick={() => setActiveTab("inventory")}
+          style={tabButtonStyle(activeTab === "inventory")}
+        >
+          在庫管理
+        </button>
+        <button
+          onClick={() => setActiveTab("orders")}
+          style={tabButtonStyle(activeTab === "orders")}
+        >
+          注文管理
+        </button>
+      </nav>
+
+      {activeTab === "dashboard" && (
+      <>
       <div
         style={{
           display: "grid",
@@ -549,7 +613,10 @@ const buttonStyle: React.CSSProperties = {
           )}
         </section>
       </div>
+      </>
+      )}
 
+      {activeTab === "orders" && (
       <section style={sectionStyle}>
         <h2 style={{ margin: "0 0 12px" }}>注文管理</h2>
 
@@ -575,42 +642,54 @@ const buttonStyle: React.CSSProperties = {
               </button>
             </div>
 
-            <h3 style={{ margin: "16px 0 8px", fontSize: 16 }}>レシピ登録</h3>
-            <div style={{ display: "grid", gap: 8 }}>
-              <select
-                value={recipeMenuId}
-                onChange={(e) => setRecipeMenuId(e.target.value)}
-                style={inputStyle}
-              >
-                <option value="">メニューを選択</option>
-                {menuItems.map((menu) => (
-                  <option key={menu.id} value={menu.id}>
-                    {menu.name}
-                  </option>
-                ))}
-              </select>
+	            <h3 style={{ margin: "16px 0 8px", fontSize: 16 }}>レシピ登録</h3>
+	            <p style={{ margin: "0 0 8px", fontSize: 14 }}>
+	              メニューを選び、そのメニュー1個を作るために使う食材と量を登録します。
+	            </p>
+	            <div style={{ display: "grid", gap: 8 }}>
+	              <label style={fieldLabelStyle}>
+	                メニュー
+	                <select
+	                  value={recipeMenuId}
+	                  onChange={(e) => setRecipeMenuId(e.target.value)}
+	                  style={inputStyle}
+	                >
+	                  <option value="">メニューを選択</option>
+	                  {menuItems.map((menu) => (
+	                    <option key={menu.id} value={menu.id}>
+	                      {menu.name}
+	                    </option>
+	                  ))}
+	                </select>
+	              </label>
 
-              <select
-                value={recipeItemId}
-                onChange={(e) => setRecipeItemId(e.target.value)}
-                style={inputStyle}
-              >
-                <option value="">食材を選択</option>
-                {items.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name}（{item.unit}）
-                  </option>
-                ))}
-              </select>
+	              <label style={fieldLabelStyle}>
+	                使用する食材
+	                <select
+	                  value={recipeItemId}
+	                  onChange={(e) => setRecipeItemId(e.target.value)}
+	                  style={inputStyle}
+	                >
+	                  <option value="">食材を選択</option>
+	                  {items.map((item) => (
+	                    <option key={item.id} value={item.id}>
+	                      {item.name}（{item.unit}）
+	                    </option>
+	                  ))}
+	                </select>
+	              </label>
 
-              <input
-                placeholder="1個あたりの使用量"
-                value={recipeQuantity}
-                onChange={(e) => setRecipeQuantity(e.target.value)}
-                style={inputStyle}
-              />
+	              <label style={fieldLabelStyle}>
+	                1個あたりの使用量
+	                <input
+	                  placeholder="例：15"
+	                  value={recipeQuantity}
+	                  onChange={(e) => setRecipeQuantity(e.target.value)}
+	                  style={inputStyle}
+	                />
+	              </label>
 
-              <button onClick={addRecipeItem} disabled={loading}>
+	              <button onClick={addRecipeItem} disabled={loading}>
                 レシピに追加
               </button>
             </div>
@@ -685,7 +764,23 @@ const buttonStyle: React.CSSProperties = {
                     border: "1px solid #ddd",
                   }}
                 >
-                  <strong>{menu.name}</strong>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 8,
+                      alignItems: "center",
+                    }}
+                  >
+                    <strong>{menu.name}</strong>
+                    <button
+                      onClick={() => removeMenu(menu)}
+                      disabled={loading}
+                      style={buttonStyle}
+                    >
+                      メニュー削除
+                    </button>
+                  </div>
                   {menu.recipes.length === 0 ? (
                     <p style={{ margin: "8px 0 0" }}>レシピ未登録</p>
                   ) : (
@@ -718,7 +813,9 @@ const buttonStyle: React.CSSProperties = {
           </div>
         )}
       </section>
+      )}
 
+      {activeTab === "dashboard" && (
       <section style={sectionStyle}>
         <h2 style={{ margin: "0 0 12px" }}>廃棄分析</h2>
 
@@ -781,7 +878,10 @@ const buttonStyle: React.CSSProperties = {
           </>
         )}
       </section>
+      )}
 
+      {activeTab === "inventory" && (
+      <>
       <section style={sectionStyle}>
         <h2 style={{ margin: "0 0 12px" }}>商品追加</h2>
 
@@ -1186,6 +1286,8 @@ const buttonStyle: React.CSSProperties = {
 
       {!loading && !error && items.length === 0 && (
         <p>商品がまだ登録されていません</p>
+      )}
+      </>
       )}
     </div>
     </div>
