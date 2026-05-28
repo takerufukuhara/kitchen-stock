@@ -140,7 +140,7 @@ const cancelEdit = () => {
     }
   };
 
-  // ✅ 追加：入力欄の数量を使って入出庫する
+  // 入力欄の数量を使って在庫を増減する
   const moveWithQty = async (
     itemId: string,
     sign: 1 | -1,
@@ -357,12 +357,15 @@ const cancelEdit = () => {
   textAlign: "left",
   padding: "12px 8px",
   fontSize: 14,
+  color: "#111827",
+  fontWeight: 700,
   borderBottom: "1px solid #ddd",
 };
 
 const tdStyle: React.CSSProperties = {
   padding: "12px 8px",
   verticalAlign: "top",
+  color: "#111827",
   borderBottom: "1px solid #eee",
 };
 
@@ -378,7 +381,19 @@ const inputStyle: React.CSSProperties = {
   minHeight: 34,
   padding: "6px 8px",
   borderRadius: 6,
-  border: "1px solid #ccc",
+  border: "1px solid #9ca3af",
+  color: "#111827",
+  backgroundColor: "#fff",
+  fontWeight: 500,
+};
+
+const buttonStyle: React.CSSProperties = {
+  color: "#111827",
+  backgroundColor: "#fff",
+  border: "1px solid #9ca3af",
+  borderRadius: 6,
+  fontWeight: 600,
+  cursor: "pointer",
 };
 
 
@@ -387,8 +402,10 @@ const inputStyle: React.CSSProperties = {
     style={{
       minHeight: "100vh",
       backgroundColor: "#f4f6f8",
+      color: "#111827",
       padding: "40px 0",
-      fontFamily: "sans-serif",
+      fontFamily:
+        'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
     }}
   >
     <div
@@ -396,6 +413,7 @@ const inputStyle: React.CSSProperties = {
         maxWidth: 1000,
         margin: "0 auto",
         background: "white",
+        color: "#111827",
         padding: 24,
         borderRadius: 12,
         boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
@@ -435,6 +453,7 @@ const inputStyle: React.CSSProperties = {
                       setCategoryFilter(selected ? "" : summary.category)
                     }
                     style={{
+                      ...buttonStyle,
                       textAlign: "left",
                       padding: 12,
                       borderRadius: 8,
@@ -638,7 +657,7 @@ const inputStyle: React.CSSProperties = {
                       disabled={loading}
                       style={{ marginLeft: 8 }}
                     >
-                      完了して出庫
+                    完了して使用
                     </button>
                   </li>
                 ))}
@@ -1031,7 +1050,7 @@ const inputStyle: React.CSSProperties = {
                     disabled={loading}
                     style={{ marginRight: 6 }}
                   >
-                    入庫
+                    仕入れ
                   </button>
 
                   <button
@@ -1039,7 +1058,7 @@ const inputStyle: React.CSSProperties = {
                     disabled={loading}
                     style={{ marginRight: 6 }}
                   >
-                    出庫
+                    使用
                   </button>
 
                   <button
@@ -1055,7 +1074,7 @@ const inputStyle: React.CSSProperties = {
                     disabled={loading}
                     style={{ marginRight: 6 }}
                   >
-                    修正
+                    在庫修正
                   </button>
 
                   <button
@@ -1099,7 +1118,7 @@ const inputStyle: React.CSSProperties = {
                     onClick={() => startEdit(item)}
                     disabled={loading}
                   >
-                    編集
+                    商品編集
                   </button>
                 </>
               )}
@@ -1122,8 +1141,8 @@ const inputStyle: React.CSSProperties = {
                         <li key={h.id} style={{ marginBottom: 6 }}>
                           {new Date(h.created_at).toLocaleString()} /{" "}
                           {h.delta >= 0
-                            ? `入庫 ${h.delta}${item.unit}`
-                            : `出庫 ${Math.abs(h.delta)}${item.unit}`}
+                            ? `${h.reason ?? "仕入れ"} +${h.delta}${item.unit}`
+                            : `${h.reason ?? "使用"} -${Math.abs(h.delta)}${item.unit}`}
                           {h.reason && ` / ${h.reason}`}
 
                           <button
