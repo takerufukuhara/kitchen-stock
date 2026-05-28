@@ -117,19 +117,65 @@ const cancelEdit = () => {
     loadItems();
   }, []);
 
+  const getCategoryLabel = (item: Item) => item.category?.trim() || "未分類";
+
   const categories = Array.from(
-    new Set(
-      items
-        .map((item) => item.category?.trim())
-        .filter((category): category is string => Boolean(category))
-    )
+    new Set(items.map((item) => getCategoryLabel(item)))
   ).sort((a, b) => a.localeCompare(b, "ja"));
+
+  const categorySummaries = categories
+    .map((category) => {
+      const categoryItems = items.filter(
+        (item) => getCategoryLabel(item) === category
+      );
+      const lowCount = categoryItems.filter(
+        (item) =>
+          item.par_level !== null && item.current_stock < item.par_level
+      ).length;
+      const totalStock = categoryItems.reduce(
+        (sum, item) => sum + item.current_stock,
+        0
+      );
+
+      return {
+        category,
+        itemCount: categoryItems.length,
+        lowCount,
+        totalStock,
+      };
+    })
+    .sort((a, b) => {
+      if (b.lowCount !== a.lowCount) return b.lowCount - a.lowCount;
+      return a.category.localeCompare(b.category, "ja");
+    });
+
+  const lowStockItems = items
+    .filter(
+      (item) => item.par_level !== null && item.current_stock < item.par_level
+    )
+    .map((item) => ({
+      ...item,
+      shortage: (item.par_level ?? 0) - item.current_stock,
+    }))
+    .sort((a, b) => {
+      if (b.shortage !== a.shortage) return b.shortage - a.shortage;
+      return a.name.localeCompare(b.name, "ja");
+    });
+
+  const orderListByCategory = categories
+    .map((category) => ({
+      category,
+      items: lowStockItems.filter(
+        (item) => getCategoryLabel(item) === category
+      ),
+    }))
+    .filter((group) => group.items.length > 0);
 
   const visibleItems = items
   .filter((it) => it.name.toLowerCase().includes(query.trim().toLowerCase()))
   .filter((it) => {
     if (!categoryFilter) return true;
-    return (it.category ?? "") === categoryFilter;
+    return getCategoryLabel(it) === categoryFilter;
   })
   .filter((it) => {
     if (!onlyLow) return true;
@@ -190,6 +236,98 @@ const tdStyle: React.CSSProperties = {
 
       <h1>在庫一覧</h1>
 
+      <div
+        style={{
+          marginTop: 12,
+          marginBottom: 20,
+          padding: 16,
+          borderRadius: 8,
+          border: lowStockItems.length > 0 ? "1px solid #fca5a5" : "1px solid #ddd",
+          background: lowStockItems.length > 0 ? "#fef2f2" : "#f9fafb",
+        }}
+      >
+        <h2 style={{ margin: "0 0 8px" }}>低在庫アラート</h2>
+
+        {lowStockItems.length === 0 ? (
+          <p style={{ margin: 0 }}>基準在庫を下回っている商品はありません</p>
+        ) : (
+          <>
+            <p style={{ margin: "0 0 12px" }}>
+              {lowStockItems.length}件の商品が基準在庫を下回っています。
+            </p>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+                gap: 8,
+              }}
+            >
+              {lowStockItems.map((item) => (
+                <div
+                  key={item.id}
+                  style={{
+                    padding: 10,
+                    borderRadius: 8,
+                    background: "white",
+                    border: "1px solid #fecaca",
+                  }}
+                >
+                  <strong>{item.name}</strong>
+                  <div style={{ fontSize: 14 }}>
+                    {getCategoryLabel(item)} / 現在 {item.current_stock}
+                    {item.unit}
+                  </div>
+                  <div style={{ color: "red", fontSize: 14 }}>
+                    あと {item.shortage}
+                    {item.unit} 必要
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+
+      <div style={{ marginTop: 12, marginBottom: 20 }}>
+        <h2 style={{ margin: "8px 0" }}>発注リスト</h2>
+
+        {orderListByCategory.length === 0 ? (
+          <p style={{ margin: 0 }}>発注が必要な商品はありません</p>
+        ) : (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+              gap: 12,
+            }}
+          >
+            {orderListByCategory.map((group) => (
+              <div
+                key={group.category}
+                style={{
+                  padding: 12,
+                  borderRadius: 8,
+                  border: "1px solid #ddd",
+                  background: "#fff",
+                }}
+              >
+                <h3 style={{ margin: "0 0 8px", fontSize: 16 }}>
+                  {group.category}
+                </h3>
+                <ul style={{ margin: 0, paddingLeft: 20 }}>
+                  {group.items.map((item) => (
+                    <li key={item.id} style={{ marginBottom: 6 }}>
+                      {item.name}: {item.shortage}
+                      {item.unit} 発注
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       <div style={{ marginTop: 12, marginBottom: 16 }}>
   <input
     placeholder="検索（商品名）"
@@ -238,6 +376,57 @@ const tdStyle: React.CSSProperties = {
     <option value="desc">降順</option>
   </select>
 </div>
+
+      <div style={{ marginTop: 12, marginBottom: 20 }}>
+        <h2 style={{ margin: "8px 0" }}>カテゴリ別まとめ</h2>
+
+        {categorySummaries.length === 0 ? (
+          <p style={{ margin: 0 }}>カテゴリはまだありません</p>
+        ) : (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+              gap: 12,
+            }}
+          >
+            {categorySummaries.map((summary) => {
+              const selected = categoryFilter === summary.category;
+
+              return (
+                <button
+                  key={summary.category}
+                  onClick={() =>
+                    setCategoryFilter(selected ? "" : summary.category)
+                  }
+                  style={{
+                    textAlign: "left",
+                    padding: 12,
+                    borderRadius: 8,
+                    border: selected ? "2px solid #2563eb" : "1px solid #ddd",
+                    background: selected ? "#eff6ff" : "#fff",
+                    cursor: "pointer",
+                  }}
+                >
+                  <strong>{summary.category}</strong>
+                  <div style={{ marginTop: 8, fontSize: 14 }}>
+                    商品数: {summary.itemCount}
+                  </div>
+                  <div style={{ fontSize: 14 }}>
+                    低在庫:{" "}
+                    <span style={{ color: summary.lowCount > 0 ? "red" : "#333" }}>
+                      {summary.lowCount}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 14 }}>
+                    合計在庫: {summary.totalStock}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
 
       {/* 既に「商品追加」がある前提：なければこのブロックは削ってOK */}
