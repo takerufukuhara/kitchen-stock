@@ -23,7 +23,6 @@ export default function App() {
 
   // ✅ 追加：商品ごとの数量入力を保持（key=item.id, value=入力文字列）
   const [qtyById, setQtyById] = useState<Record<string, string>>({});
-  const [reasonById, setReasonById] = useState<Record<string, string>>({});
 
   // 既に作っている商品追加フォーム用（あるならそのまま）
   const [newName, setNewName] = useState("");
@@ -124,13 +123,6 @@ const cancelEdit = () => {
         }
         return next;
       });
-      setReasonById((prev) => {
-        const next = { ...prev };
-        for (const it of data) {
-          if (next[it.id] === undefined) next[it.id] = "使用";
-        }
-        return next;
-      });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -149,7 +141,11 @@ const cancelEdit = () => {
   };
 
   // ✅ 追加：入力欄の数量を使って入出庫する
-  const moveWithQty = async (itemId: string, sign: 1 | -1) => {
+  const moveWithQty = async (
+    itemId: string,
+    sign: 1 | -1,
+    reason: string
+  ) => {
     const raw = qtyById[itemId] ?? "1";
     const qty = Number(raw);
 
@@ -159,7 +155,6 @@ const cancelEdit = () => {
       return;
     }
 
-    const reason = sign === 1 ? "仕入れ" : reasonById[itemId] ?? "使用";
     await moveStock(itemId, sign * qty, reason);
   };
 
@@ -1031,23 +1026,8 @@ const inputStyle: React.CSSProperties = {
                     style={{ width: 60, marginRight: 6 }}
                   />
 
-                  <select
-                    value={reasonById[item.id] ?? "使用"}
-                    onChange={(e) =>
-                      setReasonById((prev) => ({
-                        ...prev,
-                        [item.id]: e.target.value,
-                      }))
-                    }
-                    style={{ marginRight: 6 }}
-                  >
-                    <option value="使用">使用</option>
-                    <option value="廃棄">廃棄</option>
-                    <option value="棚卸し修正">棚卸し修正</option>
-                  </select>
-
                   <button
-                    onClick={() => moveWithQty(item.id, 1)}
+                    onClick={() => moveWithQty(item.id, 1, "仕入れ")}
                     disabled={loading}
                     style={{ marginRight: 6 }}
                   >
@@ -1055,11 +1035,27 @@ const inputStyle: React.CSSProperties = {
                   </button>
 
                   <button
-                    onClick={() => moveWithQty(item.id, -1)}
+                    onClick={() => moveWithQty(item.id, -1, "使用")}
                     disabled={loading}
                     style={{ marginRight: 6 }}
                   >
                     出庫
+                  </button>
+
+                  <button
+                    onClick={() => moveWithQty(item.id, -1, "廃棄")}
+                    disabled={loading}
+                    style={{ marginRight: 6 }}
+                  >
+                    廃棄
+                  </button>
+
+                  <button
+                    onClick={() => moveWithQty(item.id, -1, "棚卸し修正")}
+                    disabled={loading}
+                    style={{ marginRight: 6 }}
+                  >
+                    修正
                   </button>
 
                   <button
