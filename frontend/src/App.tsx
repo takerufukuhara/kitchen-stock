@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { fetchItems, type Item, createItem,deleteItem,updateItem } from "./api/items";
 import { createStockMovement, fetchStockMovements, deleteStockMovement, fetchWasteSummary, type StockMovement, type WasteSummary } from "./api/stockMovements";
 import {
@@ -53,7 +53,7 @@ const [editPar, setEditPar] = useState<string>(""); // 入力欄は文字列で�
 
 const [categoryFilter, setCategoryFilter] = useState("");
 const [onlyLow, setOnlyLow] = useState(false);
-const [activeTab, setActiveTab] = useState<"low-stock" | "waste" | "inventory" | "orders">("low-stock");
+const [activeTab, setActiveTab] = useState<"inventory" | "low-stock" | "waste" | "orders">("inventory");
 
 
 
@@ -93,28 +93,13 @@ const cancelEdit = () => {
     try {
       setLoading(true);
       setError(null);
-      const [data, wasteData, menuData, orderData] = await Promise.all([
-        fetchItems(),
-        fetchWasteSummary(),
-        fetchMenuItems(),
-        fetchOrders(),
-      ]);
+      const data = await fetchItems();
       setItems(data);
-      setWasteSummaries(wasteData);
-      setMenuItems(menuData);
-      setOrders(orderData);
 
-      if (!recipeMenuId && menuData.length > 0) {
-        setRecipeMenuId(menuData[0].id);
-      }
       if (!recipeItemId && data.length > 0) {
         setRecipeItemId(data[0].id);
       }
-      if (!orderMenuId && menuData.length > 0) {
-        setOrderMenuId(menuData[0].id);
-      }
 
-      // ✅ 追加：新しく出てきたitemに数量初期値を入れておく（空欄→"1"）
       setQtyById((prev) => {
         const next = { ...prev };
         for (const it of data) {
@@ -129,11 +114,54 @@ const cancelEdit = () => {
     }
   };
 
+  const loadWasteData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const wasteData = await fetchWasteSummary();
+      setWasteSummaries(wasteData);
+    } catch (e) {
+      setWasteSummaries([]);
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadOrderData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const [menuData, orderData] = await Promise.all([
+        fetchMenuItems(),
+        fetchOrders(),
+      ]);
+      setMenuItems(menuData);
+      setOrders(orderData);
+
+      if (!recipeMenuId && menuData.length > 0) {
+        setRecipeMenuId(menuData[0].id);
+      }
+      if (!orderMenuId && menuData.length > 0) {
+        setOrderMenuId(menuData[0].id);
+      }
+    } catch (e) {
+      setMenuItems([]);
+      setOrders([]);
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const moveStock = async (itemId: string, delta: number, reason: string) => {
     try {
       setError(null);
       await createStockMovement({ item_id: itemId, delta, reason });
       await loadItems();
+      if (reason === "廃棄") {
+        await loadWasteData();
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -160,6 +188,15 @@ const cancelEdit = () => {
   useEffect(() => {
     loadItems();
   }, []);
+
+  useEffect(() => {
+    if (activeTab === "waste") {
+      loadWasteData();
+    }
+    if (activeTab === "orders") {
+      loadOrderData();
+    }
+  }, [activeTab]);
 
   const getCategoryLabel = (item: Item) => item.category?.trim() || "未分類";
 
@@ -200,6 +237,12 @@ const cancelEdit = () => {
     return a.localeCompare(b, "ja");
   });
 
+  const unitOptions = Array.from(
+    new Set(items.map((item) => item.unit.trim()).filter(Boolean))
+  ).sort((a, b) => a.localeCompare(b, "ja"));
+
+  const categoryOptions = categories.filter((category) => category !== "未分類");
+
   const categorySummaries = categories
     .map((category) => {
       const categoryItems = items.filter(
@@ -209,16 +252,10 @@ const cancelEdit = () => {
         (item) =>
           item.par_level !== null && item.current_stock < item.par_level
       ).length;
-      const totalStock = categoryItems.reduce(
-        (sum, item) => sum + item.current_stock,
-        0
-      );
-
       return {
         category,
         itemCount: categoryItems.length,
         lowCount,
-        totalStock,
       };
     })
     .sort((a, b) => {
@@ -283,6 +320,7 @@ const cancelEdit = () => {
         par_level: summary.suggested_par_level,
       });
       await loadItems();
+      await loadWasteData();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -303,7 +341,7 @@ const cancelEdit = () => {
       setNewMenuName("");
       setRecipeMenuId(created.id);
       setOrderMenuId(created.id);
-      await loadItems();
+      await loadOrderData();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -324,7 +362,7 @@ const cancelEdit = () => {
         quantity,
       });
       setRecipeQuantity("1");
-      await loadItems();
+      await loadOrderData();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -340,7 +378,7 @@ const cancelEdit = () => {
       await deleteMenuItem(menu.id);
       if (recipeMenuId === menu.id) setRecipeMenuId("");
       if (orderMenuId === menu.id) setOrderMenuId("");
-      await loadItems();
+      await loadOrderData();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -357,7 +395,7 @@ const cancelEdit = () => {
       setError(null);
       await createOrder({ menu_item_id: orderMenuId, quantity });
       setOrderQuantity("1");
-      await loadItems();
+      await loadOrderData();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -368,6 +406,7 @@ const cancelEdit = () => {
       setError(null);
       await completeOrder(orderId);
       await loadItems();
+      await loadOrderData();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -482,6 +521,12 @@ const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
         }}
       >
         <button
+          onClick={() => setActiveTab("inventory")}
+          style={tabButtonStyle(activeTab === "inventory")}
+        >
+          在庫管理
+        </button>
+        <button
           onClick={() => setActiveTab("low-stock")}
           style={tabButtonStyle(activeTab === "low-stock")}
         >
@@ -492,12 +537,6 @@ const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
           style={tabButtonStyle(activeTab === "waste")}
         >
           廃棄分析
-        </button>
-        <button
-          onClick={() => setActiveTab("inventory")}
-          style={tabButtonStyle(activeTab === "inventory")}
-        >
-          在庫管理
         </button>
         <button
           onClick={() => setActiveTab("orders")}
@@ -764,7 +803,7 @@ const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
                               try {
                                 setError(null);
                                 await deleteRecipe(recipe.id);
-                                await loadItems();
+                                await loadOrderData();
                               } catch (e) {
                                 setError(e instanceof Error ? e.message : String(e));
                               }
@@ -895,9 +934,6 @@ const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
                         {summary.lowCount}
                       </span>
                     </div>
-                    <div style={{ fontSize: 14 }}>
-                      合計在庫: {summary.totalStock}
-                    </div>
                   </button>
                 );
               })}
@@ -925,15 +961,27 @@ const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
           <input
             placeholder="単位（例：個, g, 本）"
             value={newUnit}
+            list="unit-options"
             onChange={(e) => setNewUnit(e.target.value)}
             style={inputStyle}
           />
+          <datalist id="unit-options">
+            {unitOptions.map((unit) => (
+              <option key={unit} value={unit} />
+            ))}
+          </datalist>
           <input
             placeholder="カテゴリ（例：野菜）"
             value={newCategory}
+            list="category-options"
             onChange={(e) => setNewCategory(e.target.value)}
             style={inputStyle}
           />
+          <datalist id="category-options">
+            {categoryOptions.map((category) => (
+              <option key={category} value={category} />
+            ))}
+          </datalist>
           <input
             placeholder="基準在庫（任意）"
             value={newPar}
@@ -1014,8 +1062,8 @@ const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
         item.par_level !== null && item.current_stock < item.par_level;
 
       return (
-        <>
-          <tr key={item.id}>
+        <Fragment key={item.id}>
+          <tr>
             <td style={tdStyle}>
               {editingId === item.id ? (
                 <>
@@ -1205,7 +1253,7 @@ const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
           </tr>
 
           {openHistoryItemId === item.id && (
-            <tr key={`${item.id}-history`}>
+            <tr>
               <td colSpan={4} style={tdStyle}>
                 <div style={{ paddingLeft: 12 }}>
                   {historyLoading && <p>履歴読み込み中...</p>}
@@ -1238,6 +1286,9 @@ const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
                                 await deleteStockMovement(h.id);
                                 await loadHistory(item.id);
                                 await loadItems();
+                                if (h.reason === "廃棄") {
+                                  await loadWasteData();
+                                }
                               } catch (e) {
                                 setError(
                                   e instanceof Error ? e.message : String(e)
@@ -1256,7 +1307,7 @@ const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
               </td>
             </tr>
           )}
-        </>
+        </Fragment>
       );
     })}
   </tbody>
