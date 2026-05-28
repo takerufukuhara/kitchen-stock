@@ -213,6 +213,21 @@ const tdStyle: React.CSSProperties = {
   borderBottom: "1px solid #eee",
 };
 
+const sectionStyle: React.CSSProperties = {
+  marginTop: 16,
+  padding: 16,
+  borderRadius: 8,
+  border: "1px solid #ddd",
+  background: "#fff",
+};
+
+const inputStyle: React.CSSProperties = {
+  minHeight: 34,
+  padding: "6px 8px",
+  borderRadius: 6,
+  border: "1px solid #ccc",
+};
+
 
   return (
   <div
@@ -238,102 +253,187 @@ const tdStyle: React.CSSProperties = {
 
       <div
         style={{
-          marginTop: 12,
-          marginBottom: 20,
-          padding: 16,
-          borderRadius: 8,
-          border: lowStockItems.length > 0 ? "1px solid #fca5a5" : "1px solid #ddd",
-          background: lowStockItems.length > 0 ? "#fef2f2" : "#f9fafb",
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1.1fr) minmax(300px, 0.9fr)",
+          gap: 16,
+          alignItems: "start",
         }}
       >
-        <h2 style={{ margin: "0 0 8px" }}>低在庫アラート</h2>
+        <section style={{ ...sectionStyle, marginTop: 0 }}>
+          <h2 style={{ margin: "0 0 12px" }}>カテゴリ別まとめ</h2>
 
-        {lowStockItems.length === 0 ? (
-          <p style={{ margin: 0 }}>基準在庫を下回っている商品はありません</p>
-        ) : (
-          <>
-            <p style={{ margin: "0 0 12px" }}>
-              {lowStockItems.length}件の商品が基準在庫を下回っています。
-            </p>
+          {categorySummaries.length === 0 ? (
+            <p style={{ margin: 0 }}>カテゴリはまだありません</p>
+          ) : (
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-                gap: 8,
+                gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+                gap: 12,
               }}
             >
-              {lowStockItems.map((item) => (
-                <div
-                  key={item.id}
-                  style={{
-                    padding: 10,
-                    borderRadius: 8,
-                    background: "white",
-                    border: "1px solid #fecaca",
-                  }}
-                >
-                  <strong>{item.name}</strong>
-                  <div style={{ fontSize: 14 }}>
-                    {getCategoryLabel(item)} / 現在 {item.current_stock}
-                    {item.unit}
-                  </div>
-                  <div style={{ color: "red", fontSize: 14 }}>
-                    あと {item.shortage}
-                    {item.unit} 必要
-                  </div>
+              {categorySummaries.map((summary) => {
+                const selected = categoryFilter === summary.category;
+
+                return (
+                  <button
+                    key={summary.category}
+                    onClick={() =>
+                      setCategoryFilter(selected ? "" : summary.category)
+                    }
+                    style={{
+                      textAlign: "left",
+                      padding: 12,
+                      borderRadius: 8,
+                      border: selected ? "2px solid #2563eb" : "1px solid #ddd",
+                      background: selected ? "#eff6ff" : "#fff",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <strong>{summary.category}</strong>
+                    <div style={{ marginTop: 8, fontSize: 14 }}>
+                      商品数: {summary.itemCount}
+                    </div>
+                    <div style={{ fontSize: 14 }}>
+                      低在庫:{" "}
+                      <span style={{ color: summary.lowCount > 0 ? "red" : "#333" }}>
+                        {summary.lowCount}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 14 }}>
+                      合計在庫: {summary.totalStock}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        <section
+          style={{
+            ...sectionStyle,
+            marginTop: 0,
+            border:
+              lowStockItems.length > 0 ? "1px solid #fca5a5" : "1px solid #ddd",
+            background: lowStockItems.length > 0 ? "#fef2f2" : "#fff",
+          }}
+        >
+          <h2 style={{ margin: "0 0 8px" }}>低在庫アラート</h2>
+
+          {lowStockItems.length === 0 ? (
+            <p style={{ margin: 0 }}>基準在庫を下回っている商品はありません</p>
+          ) : (
+            <p style={{ margin: "0 0 12px" }}>
+              {lowStockItems.length}件の商品が基準在庫を下回っています。
+            </p>
+          )}
+
+          <h3 style={{ margin: "16px 0 8px", fontSize: 16 }}>発注リスト</h3>
+
+          {orderListByCategory.length === 0 ? (
+            <p style={{ margin: 0 }}>発注が必要な商品はありません</p>
+          ) : (
+            <>
+              {orderListByCategory.map((group) => (
+                <div key={group.category} style={{ marginTop: 12 }}>
+                  <h4 style={{ margin: "0 0 6px", fontSize: 15 }}>
+                    {group.category}
+                  </h4>
+                  <ul style={{ margin: 0, paddingLeft: 20 }}>
+                    {group.items.map((item) => (
+                      <li key={item.id} style={{ marginBottom: 6 }}>
+                        {item.name}: {item.shortage}
+                        {item.unit} 発注
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               ))}
-            </div>
-          </>
-        )}
+            </>
+          )}
+        </section>
       </div>
 
-      <div style={{ marginTop: 12, marginBottom: 20 }}>
-        <h2 style={{ margin: "8px 0" }}>発注リスト</h2>
+      <section style={sectionStyle}>
+        <h2 style={{ margin: "0 0 12px" }}>商品追加</h2>
 
-        {orderListByCategory.length === 0 ? (
-          <p style={{ margin: 0 }}>発注が必要な商品はありません</p>
-        ) : (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-              gap: 12,
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+            gap: 8,
+            alignItems: "center",
+          }}
+        >
+          <input
+            placeholder="商品名（例：トマト）"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            style={inputStyle}
+          />
+          <input
+            placeholder="単位（例：個, g, 本）"
+            value={newUnit}
+            onChange={(e) => setNewUnit(e.target.value)}
+            style={inputStyle}
+          />
+          <input
+            placeholder="カテゴリ（例：野菜）"
+            value={newCategory}
+            onChange={(e) => setNewCategory(e.target.value)}
+            style={inputStyle}
+          />
+          <input
+            placeholder="基準在庫（任意）"
+            value={newPar}
+            onChange={(e) => setNewPar(e.target.value)}
+            style={inputStyle}
+          />
+
+          <button
+            onClick={async () => {
+              try {
+                setError(null);
+                await createItem({
+                  name: newName.trim(),
+                  unit: newUnit.trim(),
+                  category: newCategory.trim() || null,
+                  par_level: newPar.trim() === "" ? null : Number(newPar),
+                });
+                setNewName("");
+                setNewUnit("");
+                setNewCategory("");
+                setNewPar("");
+                await loadItems();
+              } catch (e) {
+                setError(e instanceof Error ? e.message : String(e));
+              }
             }}
+            disabled={loading}
+            style={{ minHeight: 36 }}
           >
-            {orderListByCategory.map((group) => (
-              <div
-                key={group.category}
-                style={{
-                  padding: 12,
-                  borderRadius: 8,
-                  border: "1px solid #ddd",
-                  background: "#fff",
-                }}
-              >
-                <h3 style={{ margin: "0 0 8px", fontSize: 16 }}>
-                  {group.category}
-                </h3>
-                <ul style={{ margin: 0, paddingLeft: 20 }}>
-                  {group.items.map((item) => (
-                    <li key={item.id} style={{ marginBottom: 6 }}>
-                      {item.name}: {item.shortage}
-                      {item.unit} 発注
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+            追加
+          </button>
+        </div>
+      </section>
 
-      <div style={{ marginTop: 12, marginBottom: 16 }}>
+      <section style={sectionStyle}>
+        <h2 style={{ margin: "0 0 12px" }}>表示条件</h2>
+
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 8,
+            alignItems: "center",
+          }}
+        >
   <input
     placeholder="検索（商品名）"
     value={query}
     onChange={(e) => setQuery(e.target.value)}
-    style={{ marginRight: 8 }}
+    style={inputStyle}
   />
 
   <label style={{ marginRight: 12 }}>
@@ -348,7 +448,7 @@ const tdStyle: React.CSSProperties = {
   <select
     value={categoryFilter}
     onChange={(e) => setCategoryFilter(e.target.value)}
-    style={{ marginRight: 8 }}
+    style={inputStyle}
   >
     <option value="">全カテゴリ</option>
     {categories.map((category) => (
@@ -361,7 +461,7 @@ const tdStyle: React.CSSProperties = {
   <select
     value={sortKey}
     onChange={(e) => setSortKey(e.target.value as "name" | "stock" | "created_at")}
-    style={{ marginRight: 8 }}
+    style={inputStyle}
   >
     <option value="name">名前</option>
     <option value="stock">在庫</option>
@@ -371,121 +471,19 @@ const tdStyle: React.CSSProperties = {
   <select
     value={sortDir}
     onChange={(e) => setSortDir(e.target.value as "asc" | "desc")}
+    style={inputStyle}
   >
     <option value="asc">昇順</option>
     <option value="desc">降順</option>
   </select>
-</div>
+        </div>
+      </section>
 
-      <div style={{ marginTop: 12, marginBottom: 20 }}>
-        <h2 style={{ margin: "8px 0" }}>カテゴリ別まとめ</h2>
-
-        {categorySummaries.length === 0 ? (
-          <p style={{ margin: 0 }}>カテゴリはまだありません</p>
-        ) : (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-              gap: 12,
-            }}
-          >
-            {categorySummaries.map((summary) => {
-              const selected = categoryFilter === summary.category;
-
-              return (
-                <button
-                  key={summary.category}
-                  onClick={() =>
-                    setCategoryFilter(selected ? "" : summary.category)
-                  }
-                  style={{
-                    textAlign: "left",
-                    padding: 12,
-                    borderRadius: 8,
-                    border: selected ? "2px solid #2563eb" : "1px solid #ddd",
-                    background: selected ? "#eff6ff" : "#fff",
-                    cursor: "pointer",
-                  }}
-                >
-                  <strong>{summary.category}</strong>
-                  <div style={{ marginTop: 8, fontSize: 14 }}>
-                    商品数: {summary.itemCount}
-                  </div>
-                  <div style={{ fontSize: 14 }}>
-                    低在庫:{" "}
-                    <span style={{ color: summary.lowCount > 0 ? "red" : "#333" }}>
-                      {summary.lowCount}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: 14 }}>
-                    合計在庫: {summary.totalStock}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-
-      {/* 既に「商品追加」がある前提：なければこのブロックは削ってOK */}
-      <div style={{ marginTop: 12, marginBottom: 16 }}>
-        <h2 style={{ margin: "8px 0" }}>商品追加</h2>
-
-        <input
-          placeholder="商品名（例：トマト）"
-          value={newName}
-          onChange={(e) => setNewName(e.target.value)}
-          style={{ marginRight: 8 }}
-        />
-        <input
-          placeholder="単位（例：個, g, 本）"
-          value={newUnit}
-          onChange={(e) => setNewUnit(e.target.value)}
-          style={{ marginRight: 8 }}
-        />
-        <input
-          placeholder="カテゴリ（例：野菜）"
-          value={newCategory}
-          onChange={(e) => setNewCategory(e.target.value)}
-          style={{ marginRight: 8 }}
-        />
-        <input
-          placeholder="par_level（任意）"
-          value={newPar}
-          onChange={(e) => setNewPar(e.target.value)}
-          style={{ width: 140, marginRight: 8 }}
-        />
-
-        <button
-          onClick={async () => {
-            try {
-              setError(null);
-              await createItem({
-                name: newName.trim(),
-                unit: newUnit.trim(),
-                category: newCategory.trim() || null,
-                par_level: newPar.trim() === "" ? null : Number(newPar),
-              });
-              setNewName("");
-              setNewUnit("");
-              setNewCategory("");
-              setNewPar("");
-              await loadItems();
-            } catch (e) {
-              setError(e instanceof Error ? e.message : String(e));
-            }
-          }}
-          disabled={loading}
-        >
-          追加
+      <div style={{ marginTop: 16 }}>
+        <button onClick={loadItems} disabled={loading}>
+          更新
         </button>
       </div>
-
-      <button onClick={loadItems} disabled={loading}>
-        更新
-      </button>
 
       {loading && <p>読み込み中...</p>}
       {error && (
