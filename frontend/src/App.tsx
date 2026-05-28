@@ -7,6 +7,7 @@ export default function App() {
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [copyMessage, setCopyMessage] = useState<string | null>(null);
 
   // ✅ 追加：商品ごとの数量入力を保持（key=item.id, value=入力文字列）
   const [qtyById, setQtyById] = useState<Record<string, string>>({});
@@ -171,6 +172,26 @@ const cancelEdit = () => {
     }))
     .filter((group) => group.items.length > 0);
 
+  const orderListText = orderListByCategory
+    .map((group) => {
+      const lines = group.items.map(
+        (item) => `- ${item.name}: ${item.shortage}${item.unit}`
+      );
+      return [`【${group.category}】`, ...lines].join("\n");
+    })
+    .join("\n\n");
+
+  const copyOrderList = async () => {
+    if (!orderListText) return;
+
+    try {
+      await navigator.clipboard.writeText(`発注リスト\n${orderListText}`);
+      setCopyMessage("発注リストをコピーしました");
+    } catch (e) {
+      setCopyMessage("コピーに失敗しました");
+    }
+  };
+
   const visibleItems = items
   .filter((it) => it.name.toLowerCase().includes(query.trim().toLowerCase()))
   .filter((it) => {
@@ -329,7 +350,24 @@ const inputStyle: React.CSSProperties = {
             </p>
           )}
 
-          <h3 style={{ margin: "16px 0 8px", fontSize: 16 }}>発注リスト</h3>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 8,
+              alignItems: "center",
+              marginTop: 16,
+              marginBottom: 8,
+            }}
+          >
+            <h3 style={{ margin: 0, fontSize: 16 }}>発注リスト</h3>
+            <button
+              onClick={copyOrderList}
+              disabled={orderListByCategory.length === 0}
+            >
+              コピー
+            </button>
+          </div>
 
           {orderListByCategory.length === 0 ? (
             <p style={{ margin: 0 }}>発注が必要な商品はありません</p>
@@ -351,6 +389,12 @@ const inputStyle: React.CSSProperties = {
                 </div>
               ))}
             </>
+          )}
+
+          {copyMessage && (
+            <p style={{ margin: "12px 0 0", fontSize: 14 }}>
+              {copyMessage}
+            </p>
           )}
         </section>
       </div>
