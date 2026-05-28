@@ -14,6 +14,7 @@ export default function App() {
   // 既に作っている商品追加フォーム用（あるならそのまま）
   const [newName, setNewName] = useState("");
   const [newUnit, setNewUnit] = useState("");
+  const [newCategory, setNewCategory] = useState("");
   const [newPar, setNewPar] = useState<string>("");
 
   const [openHistoryItemId, setOpenHistoryItemId] = useState<string | null>(null);
@@ -23,9 +24,11 @@ export default function App() {
   const [editingId, setEditingId] = useState<string | null>(null);
 const [editName, setEditName] = useState("");
 const [editUnit, setEditUnit] = useState("");
+const [editCategory, setEditCategory] = useState("");
 const [editPar, setEditPar] = useState<string>(""); // 入力欄は文字列で持つのが安全
 
 const [query, setQuery] = useState("");
+const [categoryFilter, setCategoryFilter] = useState("");
 const [onlyLow, setOnlyLow] = useState(false);
 const [sortKey, setSortKey] = useState<"name" | "stock" | "created_at">("name");
 const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -36,6 +39,7 @@ const startEdit = (item: Item) => {
   setEditingId(item.id);
   setEditName(item.name);
   setEditUnit(item.unit);
+  setEditCategory(item.category ?? "");
   setEditPar(item.par_level !== null ? String(item.par_level) : "");
 };
 
@@ -43,6 +47,7 @@ const cancelEdit = () => {
   setEditingId(null);
   setEditName("");
   setEditUnit("");
+  setEditCategory("");
   setEditPar("");
 };
 
@@ -112,8 +117,20 @@ const cancelEdit = () => {
     loadItems();
   }, []);
 
+  const categories = Array.from(
+    new Set(
+      items
+        .map((item) => item.category?.trim())
+        .filter((category): category is string => Boolean(category))
+    )
+  ).sort((a, b) => a.localeCompare(b, "ja"));
+
   const visibleItems = items
   .filter((it) => it.name.toLowerCase().includes(query.trim().toLowerCase()))
+  .filter((it) => {
+    if (!categoryFilter) return true;
+    return (it.category ?? "") === categoryFilter;
+  })
   .filter((it) => {
     if (!onlyLow) return true;
     if (it.par_level === null) return false;
@@ -191,6 +208,19 @@ const tdStyle: React.CSSProperties = {
   </label>
 
   <select
+    value={categoryFilter}
+    onChange={(e) => setCategoryFilter(e.target.value)}
+    style={{ marginRight: 8 }}
+  >
+    <option value="">全カテゴリ</option>
+    {categories.map((category) => (
+      <option key={category} value={category}>
+        {category}
+      </option>
+    ))}
+  </select>
+
+  <select
     value={sortKey}
     onChange={(e) => setSortKey(e.target.value as "name" | "stock" | "created_at")}
     style={{ marginRight: 8 }}
@@ -227,6 +257,12 @@ const tdStyle: React.CSSProperties = {
           style={{ marginRight: 8 }}
         />
         <input
+          placeholder="カテゴリ（例：野菜）"
+          value={newCategory}
+          onChange={(e) => setNewCategory(e.target.value)}
+          style={{ marginRight: 8 }}
+        />
+        <input
           placeholder="par_level（任意）"
           value={newPar}
           onChange={(e) => setNewPar(e.target.value)}
@@ -240,10 +276,12 @@ const tdStyle: React.CSSProperties = {
               await createItem({
                 name: newName.trim(),
                 unit: newUnit.trim(),
+                category: newCategory.trim() || null,
                 par_level: newPar.trim() === "" ? null : Number(newPar),
               });
               setNewName("");
               setNewUnit("");
+              setNewCategory("");
               setNewPar("");
               await loadItems();
             } catch (e) {
@@ -271,6 +309,7 @@ const tdStyle: React.CSSProperties = {
   <thead>
     <tr style={{ background: "#f0f2f5" }}>
       <th style={thStyle}>商品名</th>
+      <th style={thStyle}>カテゴリ</th>
       <th style={thStyle}>在庫</th>
       <th style={thStyle}>操作</th>
     </tr>
@@ -302,6 +341,13 @@ const tdStyle: React.CSSProperties = {
                   />
 
                   <input
+                    value={editCategory}
+                    onChange={(e) => setEditCategory(e.target.value)}
+                    placeholder="カテゴリ"
+                    style={{ width: 120, marginRight: 8 }}
+                  />
+
+                  <input
                     value={editPar}
                     onChange={(e) => setEditPar(e.target.value)}
                     placeholder="par_level（空でなし）"
@@ -319,6 +365,8 @@ const tdStyle: React.CSSProperties = {
                 </>
               )}
             </td>
+
+            <td style={tdStyle}>{item.category || "未分類"}</td>
 
             <td style={tdStyle}>{item.current_stock}</td>
 
@@ -347,6 +395,7 @@ const tdStyle: React.CSSProperties = {
                         await updateItem(item.id, {
                           name,
                           unit,
+                          category: editCategory.trim() || null,
                           par_level: parLevel,
                         });
 
@@ -448,7 +497,7 @@ const tdStyle: React.CSSProperties = {
 
           {openHistoryItemId === item.id && (
             <tr key={`${item.id}-history`}>
-              <td colSpan={3} style={tdStyle}>
+              <td colSpan={4} style={tdStyle}>
                 <div style={{ paddingLeft: 12 }}>
                   {historyLoading && <p>履歴読み込み中...</p>}
 

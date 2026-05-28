@@ -2,6 +2,7 @@ export type Item = {
   id: string;
   name: string;
   unit: string;
+  category: string | null;
   par_level: number | null;
   current_stock: number; // backendがnumberで返す想定
   created_at?: string;
@@ -29,6 +30,7 @@ export async function fetchItems(): Promise<Item[]> {
 export async function createItem(params: {
   name: string;
   unit: string;
+  category?: string | null;
   par_level?: number | null;
 }): Promise<Item> {
   const res = await fetch(`${API}/items`, {
@@ -58,7 +60,12 @@ export async function deleteItem(id: string): Promise<void> {
 
 export async function updateItem(
   id: string,
-  params: { name?: string; unit?: string; par_level?: number | null }
+  params: {
+    name?: string;
+    unit?: string;
+    category?: string | null;
+    par_level?: number | null;
+  }
 ): Promise<Item> {
   const res = await fetch(`${API}/items/${id}`, {
     method: "PATCH",

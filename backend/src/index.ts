@@ -92,11 +92,14 @@ app.post("/stock-movements", async (req, res) => {
 
 app.post("/items", async (req, res) => {
   try {
-    const { name, unit, par_level } = req.body ?? {};
+    const { name, unit, par_level, category } = req.body ?? {};
 
     if (!name || !unit) {
       return res.status(400).json({ error: "name と unit は必須です" });
     }
+
+    const trimmedCategory =
+      category === undefined || category === null ? null : String(category).trim();
 
     const { data, error } = await supabase
       .from("items")
@@ -104,6 +107,7 @@ app.post("/items", async (req, res) => {
         {
           name,
           unit,
+          category: trimmedCategory || null,
           par_level: par_level === "" || par_level === undefined ? null : Number(par_level),
         },
       ])
@@ -181,12 +185,17 @@ app.delete("/items/:id", async (req, res) => {
 app.patch("/items/:id", async (req, res) => {
   try {
     const id = req.params.id;
-    const { name, unit, par_level } = req.body ?? {};
+    const { name, unit, par_level, category } = req.body ?? {};
 
     // 送られてきた項目だけ更新する（undefinedは無視）
     const update: any = {};
     if (name !== undefined) update.name = String(name).trim();
     if (unit !== undefined) update.unit = String(unit).trim();
+    if (category !== undefined) {
+      const trimmedCategory =
+        category === null ? "" : String(category).trim();
+      update.category = trimmedCategory || null;
+    }
     if (par_level !== undefined) {
       update.par_level = par_level === "" || par_level === null ? null : Number(par_level);
     }
