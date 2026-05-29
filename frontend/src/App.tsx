@@ -9,14 +9,18 @@ import {
   deleteMenuItem,
   deleteRecipe,
   fetchMenuItems,
+  fetchPublicMenuItems,
   fetchOrders,
   getJoinedName,
   type MenuItem,
   type Order,
 } from "./api/orders";
-
-const ADMIN_LOGIN_KEY = "kitchen-stock-admin-logged-in";
-const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD ?? "";
+import {
+  clearAdminToken,
+  getAdminToken,
+  loginAdmin,
+  setAdminToken,
+} from "./api/auth";
 
 export default function App() {
   const path = window.location.pathname.replace(/\/+$/, "") || "/";
@@ -34,11 +38,11 @@ export default function App() {
 
 function AdminRoute() {
   const [loggedIn, setLoggedIn] = useState(
-    () => window.localStorage.getItem(ADMIN_LOGIN_KEY) === "true"
+    () => Boolean(getAdminToken())
   );
 
   const handleLogout = () => {
-    window.localStorage.removeItem(ADMIN_LOGIN_KEY);
+    clearAdminToken();
     setLoggedIn(false);
     window.location.href = "/login";
   };
@@ -53,6 +57,7 @@ function AdminRoute() {
 
 function AdminLoginPage() {
   const [password, setPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const inputStyle: React.CSSProperties = {
@@ -65,23 +70,21 @@ function AdminLoginPage() {
     fontWeight: 500,
   };
 
-  const submitLogin = (event: React.FormEvent) => {
+  const submitLogin = async (event: React.FormEvent) => {
     event.preventDefault();
 
-    if (!ADMIN_PASSWORD) {
-      setError("管理者パスワードが未設定です。VITE_ADMIN_PASSWORD を設定してください。");
-      return;
+    try {
+      setSubmitting(true);
+      setError(null);
+      const token = await loginAdmin(password);
+      setAdminToken(token);
+      setPassword("");
+      window.location.href = "/admin";
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmitting(false);
     }
-
-    if (password !== ADMIN_PASSWORD) {
-      setError("パスワードが違います");
-      return;
-    }
-
-    setError(null);
-    setPassword("");
-    window.localStorage.setItem(ADMIN_LOGIN_KEY, "true");
-    window.location.href = "/admin";
   };
 
   return (
@@ -125,6 +128,7 @@ function AdminLoginPage() {
           )}
           <button
             type="submit"
+            disabled={submitting}
             style={{
               minHeight: 40,
               color: "#fff",
@@ -135,7 +139,7 @@ function AdminLoginPage() {
               cursor: "pointer",
             }}
           >
-            ログイン
+            {submitting ? "ログイン中..." : "ログイン"}
           </button>
         </form>
       </main>
@@ -176,7 +180,7 @@ function CustomerOrderPage() {
       try {
         setLoading(true);
         setError(null);
-        const data = await fetchMenuItems();
+        const data = await fetchPublicMenuItems();
         setMenuItems(data);
         setQuantityByMenuId((prev) => {
           const next = { ...prev };

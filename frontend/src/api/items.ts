@@ -1,3 +1,5 @@
+import { adminHeaders } from "./auth";
+
 export type Item = {
   id: string;
   name: string;
@@ -18,7 +20,9 @@ export async function fetchItems(): Promise<Item[]> {
     throw new Error("VITE_API_URL が未設定です（frontend/.env を確認）");
   }
 
-  const res = await fetch(`${API}/items`);
+  const res = await fetch(`${API}/items`, {
+    headers: adminHeaders(),
+  });
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || `fetchItems failed: ${res.status}`);
@@ -35,7 +39,7 @@ export async function createItem(params: {
 }): Promise<Item> {
   const res = await fetch(`${API}/items`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: adminHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(params),
   });
 
@@ -50,6 +54,7 @@ export async function createItem(params: {
 export async function deleteItem(id: string): Promise<void> {
   const res = await fetch(`${API}/items/${id}`, {
     method: "DELETE",
+    headers: adminHeaders(),
   });
 
   if (!res.ok) {
@@ -69,7 +74,7 @@ export async function updateItem(
 ): Promise<Item> {
   const res = await fetch(`${API}/items/${id}`, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
+    headers: adminHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(params),
   });
 

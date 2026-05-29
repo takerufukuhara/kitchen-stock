@@ -1,3 +1,5 @@
+import { adminHeaders } from "./auth";
+
 const API = import.meta.env.VITE_API_URL?.replace(/\/+$/, "");
 
 type RecipeItemJoin = {
@@ -50,19 +52,28 @@ export function getJoinedName<T extends { name: string }>(
 }
 
 export async function fetchMenuItems(): Promise<MenuItem[]> {
-  return request<MenuItem[]>("/menu-items");
+  return request<MenuItem[]>("/menu-items", {
+    headers: adminHeaders(),
+  });
+}
+
+export async function fetchPublicMenuItems(): Promise<MenuItem[]> {
+  return request<MenuItem[]>("/public/menu-items");
 }
 
 export async function createMenuItem(name: string): Promise<MenuItem> {
   return request<MenuItem>("/menu-items", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: adminHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ name }),
   });
 }
 
 export async function deleteMenuItem(id: string): Promise<void> {
-  await request(`/menu-items/${id}`, { method: "DELETE" });
+  await request(`/menu-items/${id}`, {
+    method: "DELETE",
+    headers: adminHeaders(),
+  });
 }
 
 export async function addRecipe(params: {
@@ -72,7 +83,7 @@ export async function addRecipe(params: {
 }): Promise<Recipe> {
   return request<Recipe>(`/menu-items/${params.menu_item_id}/recipes`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: adminHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({
       item_id: params.item_id,
       quantity: params.quantity,
@@ -81,11 +92,16 @@ export async function addRecipe(params: {
 }
 
 export async function deleteRecipe(id: string): Promise<void> {
-  await request(`/recipes/${id}`, { method: "DELETE" });
+  await request(`/recipes/${id}`, {
+    method: "DELETE",
+    headers: adminHeaders(),
+  });
 }
 
 export async function fetchOrders(): Promise<Order[]> {
-  return request<Order[]>("/orders");
+  return request<Order[]>("/orders", {
+    headers: adminHeaders(),
+  });
 }
 
 export async function createOrder(params: {
@@ -102,5 +118,6 @@ export async function createOrder(params: {
 export async function completeOrder(id: string): Promise<Order> {
   return request<Order>(`/orders/${id}/complete`, {
     method: "PATCH",
+    headers: adminHeaders(),
   });
 }

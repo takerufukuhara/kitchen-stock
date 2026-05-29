@@ -1,3 +1,5 @@
+import { adminHeaders } from "./auth";
+
 const API = import.meta.env.VITE_API_URL?.replace(/\/+$/, "");
 
 export async function createStockMovement(params: {
@@ -9,7 +11,7 @@ export async function createStockMovement(params: {
 
   const res = await fetch(`${API}/stock-movements`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: adminHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(params),
   });
 
@@ -52,7 +54,9 @@ export async function fetchStockMovements(params: {
   url.searchParams.set("item_id", params.item_id);
   url.searchParams.set("limit", String(limit));
 
-  const res = await fetch(url.toString());
+  const res = await fetch(url.toString(), {
+    headers: adminHeaders(),
+  });
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || `fetchStockMovements failed: ${res.status}`);
@@ -67,6 +71,7 @@ export async function deleteStockMovement(id: string): Promise<void> {
 
   const res = await fetch(`${API}/stock-movements/${id}`, {
     method: "DELETE",
+    headers: adminHeaders(),
   });
 
   if (!res.ok) {
@@ -79,7 +84,9 @@ export async function fetchWasteSummary(): Promise<WasteSummary[]> {
   const API = import.meta.env.VITE_API_URL?.replace(/\/+$/, "");
   if (!API) throw new Error("VITE_API_URL が未設定です");
 
-  const res = await fetch(`${API}/waste-summary`);
+  const res = await fetch(`${API}/waste-summary`, {
+    headers: adminHeaders(),
+  });
 
   if (!res.ok) {
     const text = await res.text();

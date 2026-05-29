@@ -2,6 +2,7 @@ import dotenv from "dotenv";
 dotenv.config();
 import express from "express";
 import cors from "cors";
+import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 
 const app = express();
@@ -18,11 +19,44 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
+const adminPassword = process.env.ADMIN_PASSWORD;
+const adminToken =
+  process.env.ADMIN_AUTH_TOKEN || crypto.randomBytes(32).toString("hex");
+
+const requireAdmin: express.RequestHandler = (req, res, next) => {
+  const authHeader = req.header("Authorization");
+  const token = authHeader?.startsWith("Bearer ")
+    ? authHeader.slice("Bearer ".length)
+    : "";
+
+  if (!token || token !== adminToken) {
+    return res.status(401).json({ error: "管理者認証が必要です" });
+  }
+
+  next();
+};
+
 app.get("/health", (_req, res) => {
   res.json({ ok: true });
 });
 
-app.get("/items", async (_req, res) => {
+app.post("/admin/login", async (req, res) => {
+  const { password } = req.body ?? {};
+
+  if (!adminPassword || !process.env.ADMIN_AUTH_TOKEN) {
+    return res.status(500).json({
+      error: "管理者認証の環境変数が未設定です",
+    });
+  }
+
+  if (password !== adminPassword) {
+    return res.status(401).json({ error: "パスワードが違います" });
+  }
+
+  res.json({ token: adminToken });
+});
+
+app.get("/items", requireAdmin, async (_req, res) => {
   try {
     // items取得
     const { data: items, error: itemsError } = await supabase
@@ -64,7 +98,7 @@ app.get("/items", async (_req, res) => {
   }
 });
 
-app.post("/stock-movements", async (req, res) => {
+app.post("/stock-movements", requireAdmin, async (req, res) => {
   try {
     const { item_id, delta, reason } = req.body;
 
@@ -90,7 +124,7 @@ app.post("/stock-movements", async (req, res) => {
   }
 });
 
-app.post("/items", async (req, res) => {
+app.post("/items", requireAdmin, async (req, res) => {
   try {
     const { name, unit, par_level, category } = req.body ?? {};
 
@@ -121,7 +155,7 @@ app.post("/items", async (req, res) => {
   }
 });
 
-app.get("/stock-movements", async (req, res) => {
+app.get("/stock-movements", requireAdmin, async (req, res) => {
   try {
     const itemId = req.query.item_id as string | undefined;
     const limitStr = req.query.limit as string | undefined;
@@ -150,7 +184,7 @@ app.get("/stock-movements", async (req, res) => {
   }
 });
 
-app.get("/waste-summary", async (_req, res) => {
+app.get("/waste-summary", requireAdmin, async (_req, res) => {
   try {
     const { data: items, error: itemsError } = await supabase
       .from("items")
@@ -214,7 +248,21 @@ app.get("/waste-summary", async (_req, res) => {
   }
 });
 
-app.get("/menu-items", async (_req, res) => {
+app.get("/public/menu-items", async (_req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("menu_items")
+      .select("id,name")
+      .order("name", { ascending: true });
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data ?? []);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.get("/menu-items", requireAdmin, async (_req, res) => {
   try {
     const { data: menus, error: menusError } = await supabase
       .from("menu_items")
@@ -242,7 +290,7 @@ app.get("/menu-items", async (_req, res) => {
   }
 });
 
-app.post("/menu-items", async (req, res) => {
+app.post("/menu-items", requireAdmin, async (req, res) => {
   try {
     const { name } = req.body ?? {};
 
@@ -263,7 +311,7 @@ app.post("/menu-items", async (req, res) => {
   }
 });
 
-app.delete("/menu-items/:id", async (req, res) => {
+app.delete("/menu-items/:id", requireAdmin, async (req, res) => {
   try {
     const menuItemId = req.params.id;
 
@@ -281,7 +329,7 @@ app.delete("/menu-items/:id", async (req, res) => {
   }
 });
 
-app.post("/menu-items/:id/recipes", async (req, res) => {
+app.post("/menu-items/:id/recipes", requireAdmin, async (req, res) => {
   try {
     const menuItemId = req.params.id;
     const { item_id, quantity } = req.body ?? {};
@@ -310,7 +358,7 @@ app.post("/menu-items/:id/recipes", async (req, res) => {
   }
 });
 
-app.delete("/recipes/:id", async (req, res) => {
+app.delete("/recipes/:id", requireAdmin, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from("recipes")
@@ -326,7 +374,7 @@ app.delete("/recipes/:id", async (req, res) => {
   }
 });
 
-app.get("/orders", async (_req, res) => {
+app.get("/orders", requireAdmin, async (_req, res) => {
   try {
     const { data, error } = await supabase
       .from("orders")
@@ -368,7 +416,7 @@ app.post("/orders", async (req, res) => {
   }
 });
 
-app.patch("/orders/:id/complete", async (req, res) => {
+app.patch("/orders/:id/complete", requireAdmin, async (req, res) => {
   try {
     const orderId = req.params.id;
 
@@ -429,7 +477,7 @@ app.patch("/orders/:id/complete", async (req, res) => {
   }
 });
 
-app.delete("/items/:id", async (req, res) => {
+app.delete("/items/:id", requireAdmin, async (req, res) => {
   try {
     const id = req.params.id;
 
@@ -461,7 +509,7 @@ app.delete("/items/:id", async (req, res) => {
   }
 });
 
-app.patch("/items/:id", async (req, res) => {
+app.patch("/items/:id", requireAdmin, async (req, res) => {
   try {
     const id = req.params.id;
     const { name, unit, par_level, category } = req.body ?? {};
@@ -498,7 +546,7 @@ app.patch("/items/:id", async (req, res) => {
   }
 });
 
-app.delete("/stock-movements/:id", async (req, res) => {
+app.delete("/stock-movements/:id", requireAdmin, async (req, res) => {
   try {
     const id = req.params.id;
 
