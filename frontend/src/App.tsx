@@ -15,8 +15,305 @@ import {
   type Order,
 } from "./api/orders";
 
+const ADMIN_LOGIN_KEY = "kitchen-stock-admin-logged-in";
+const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD ?? "";
 
 export default function App() {
+  const path = window.location.pathname.replace(/\/+$/, "") || "/";
+
+  if (path === "/login") {
+    return <AdminLoginPage />;
+  }
+
+  if (path === "/admin") {
+    return <AdminRoute />;
+  }
+
+  return <CustomerOrderPage />;
+}
+
+function AdminRoute() {
+  const [loggedIn, setLoggedIn] = useState(
+    () => window.localStorage.getItem(ADMIN_LOGIN_KEY) === "true"
+  );
+
+  const handleLogout = () => {
+    window.localStorage.removeItem(ADMIN_LOGIN_KEY);
+    setLoggedIn(false);
+    window.location.href = "/login";
+  };
+
+  if (!loggedIn) {
+    window.location.href = "/login";
+    return null;
+  }
+
+  return <AdminApp onLogout={handleLogout} />;
+}
+
+function AdminLoginPage() {
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const inputStyle: React.CSSProperties = {
+    minHeight: 38,
+    padding: "6px 8px",
+    borderRadius: 6,
+    border: "1px solid #9ca3af",
+    color: "#111827",
+    backgroundColor: "#fff",
+    fontWeight: 500,
+  };
+
+  const submitLogin = (event: React.FormEvent) => {
+    event.preventDefault();
+
+    if (!ADMIN_PASSWORD) {
+      setError("管理者パスワードが未設定です。VITE_ADMIN_PASSWORD を設定してください。");
+      return;
+    }
+
+    if (password !== ADMIN_PASSWORD) {
+      setError("パスワードが違います");
+      return;
+    }
+
+    setError(null);
+    setPassword("");
+    window.localStorage.setItem(ADMIN_LOGIN_KEY, "true");
+    window.location.href = "/admin";
+  };
+
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        backgroundColor: "#f4f6f8",
+        color: "#111827",
+        padding: "40px 16px",
+        fontFamily:
+          'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+      }}
+    >
+      <main
+        style={{
+          maxWidth: 420,
+          margin: "0 auto",
+          background: "#fff",
+          padding: 24,
+          borderRadius: 12,
+          boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+        }}
+      >
+        <h1 style={{ margin: "0 0 8px" }}>管理者ログイン</h1>
+        <p style={{ margin: "0 0 20px", color: "#4b5563" }}>
+          在庫管理画面を開くにはパスワードを入力してください。
+        </p>
+
+        <form onSubmit={submitLogin} style={{ display: "grid", gap: 12 }}>
+          <input
+            type="password"
+            placeholder="管理者パスワード"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            style={inputStyle}
+          />
+          {error && (
+            <p style={{ margin: 0, color: "red", whiteSpace: "pre-wrap" }}>
+              エラー: {error}
+            </p>
+          )}
+          <button
+            type="submit"
+            style={{
+              minHeight: 40,
+              color: "#fff",
+              backgroundColor: "#2563eb",
+              border: "1px solid #2563eb",
+              borderRadius: 6,
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            ログイン
+          </button>
+        </form>
+      </main>
+    </div>
+  );
+}
+
+function CustomerOrderPage() {
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [quantityByMenuId, setQuantityByMenuId] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [submittingMenuId, setSubmittingMenuId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const inputStyle: React.CSSProperties = {
+    minHeight: 38,
+    padding: "6px 8px",
+    borderRadius: 6,
+    border: "1px solid #9ca3af",
+    color: "#111827",
+    backgroundColor: "#fff",
+    fontWeight: 500,
+  };
+
+  const buttonStyle: React.CSSProperties = {
+    minHeight: 40,
+    color: "#fff",
+    backgroundColor: "#2563eb",
+    border: "1px solid #2563eb",
+    borderRadius: 6,
+    fontWeight: 700,
+    cursor: "pointer",
+  };
+
+  useEffect(() => {
+    const loadMenus = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const data = await fetchMenuItems();
+        setMenuItems(data);
+        setQuantityByMenuId((prev) => {
+          const next = { ...prev };
+          for (const menu of data) {
+            if (next[menu.id] === undefined) next[menu.id] = "1";
+          }
+          return next;
+        });
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadMenus();
+  }, []);
+
+  const submitOrder = async (menu: MenuItem) => {
+    const quantity = Number(quantityByMenuId[menu.id] ?? "1");
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      setError("数量は1以上の数値を入力してください");
+      return;
+    }
+
+    try {
+      setSubmittingMenuId(menu.id);
+      setError(null);
+      setMessage(null);
+      await createOrder({ menu_item_id: menu.id, quantity });
+      setMessage(`「${menu.name}」の注文を受け付けました`);
+      setQuantityByMenuId((prev) => ({ ...prev, [menu.id]: "1" }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmittingMenuId(null);
+    }
+  };
+
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        backgroundColor: "#f4f6f8",
+        color: "#111827",
+        padding: "32px 0",
+        fontFamily:
+          'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+      }}
+    >
+      <main
+        style={{
+          maxWidth: 720,
+          margin: "0 auto",
+          background: "#fff",
+          padding: 24,
+          borderRadius: 12,
+          boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+        }}
+      >
+        <h1 style={{ margin: "0 0 8px" }}>注文</h1>
+        <p style={{ margin: "0 0 20px", color: "#4b5563" }}>
+          メニューと数量を選んで注文できます。
+        </p>
+
+        {loading && <p>読み込み中...</p>}
+        {error && (
+          <p style={{ color: "red", whiteSpace: "pre-wrap" }}>
+            エラー: {error}
+          </p>
+        )}
+        {message && (
+          <p
+            style={{
+              color: "#166534",
+              background: "#dcfce7",
+              border: "1px solid #86efac",
+              borderRadius: 8,
+              padding: 12,
+            }}
+          >
+            {message}
+          </p>
+        )}
+
+        {!loading && menuItems.length === 0 ? (
+          <p>注文できるメニューはまだありません</p>
+        ) : (
+          <div style={{ display: "grid", gap: 12 }}>
+            {menuItems.map((menu) => (
+              <section
+                key={menu.id}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "minmax(0, 1fr) 90px 96px",
+                  gap: 8,
+                  alignItems: "center",
+                  padding: 12,
+                  border: "1px solid #ddd",
+                  borderRadius: 8,
+                }}
+              >
+                <strong>{menu.name}</strong>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={quantityByMenuId[menu.id] ?? "1"}
+                  onChange={(e) =>
+                    setQuantityByMenuId((prev) => ({
+                      ...prev,
+                      [menu.id]: e.target.value,
+                    }))
+                  }
+                  aria-label={`${menu.name}の数量`}
+                  style={inputStyle}
+                />
+                <button
+                  onClick={() => submitOrder(menu)}
+                  disabled={submittingMenuId === menu.id}
+                  style={{
+                    ...buttonStyle,
+                    opacity: submittingMenuId === menu.id ? 0.7 : 1,
+                  }}
+                >
+                  注文する
+                </button>
+              </section>
+            ))}
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
+function AdminApp({ onLogout }: { onLogout: () => void }) {
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -195,6 +492,8 @@ const cancelEdit = () => {
     }
     if (activeTab === "orders") {
       loadOrderData();
+      const intervalId = window.setInterval(loadOrderData, 5000);
+      return () => window.clearInterval(intervalId);
     }
   }, [activeTab]);
 
@@ -509,8 +808,36 @@ const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
         boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
       }}
     >
-
-      <h1>在庫一覧</h1>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 12,
+          alignItems: "center",
+          marginBottom: 16,
+        }}
+      >
+        <h1 style={{ margin: 0 }}>在庫一覧</h1>
+        <a
+          href="/order"
+          style={{
+            ...buttonStyle,
+            padding: "10px 14px",
+            textDecoration: "none",
+          }}
+        >
+          お客様注文画面
+        </a>
+        <button
+          onClick={onLogout}
+          style={{
+            ...buttonStyle,
+            padding: "10px 14px",
+          }}
+        >
+          ログアウト
+        </button>
+      </div>
 
       <nav
         style={{
@@ -530,7 +857,7 @@ const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
           onClick={() => setActiveTab("low-stock")}
           style={tabButtonStyle(activeTab === "low-stock")}
         >
-          低在庫
+          発注管理
         </button>
         <button
           onClick={() => setActiveTab("waste")}
@@ -565,7 +892,8 @@ const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
             background: lowStockItems.length > 0 ? "#fef2f2" : "#fff",
           }}
         >
-          <h2 style={{ margin: "0 0 8px" }}>低在庫アラート</h2>
+          <h2 style={{ margin: "0 0 8px" }}>発注管理</h2>
+          <h3 style={{ margin: "0 0 8px", fontSize: 16 }}>低在庫アラート</h3>
 
           {lowStockItems.length === 0 ? (
             <p style={{ margin: 0 }}>基準在庫を下回っている商品はありません</p>
