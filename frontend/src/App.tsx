@@ -5,17 +5,25 @@ import {
   addRecipe,
   cancelOrder,
   completeOrder,
+  confirmStandaloneStaffCall,
   confirmOrderCancellation,
+  confirmStaffCall,
+  createStaffCall,
   createMenuItem,
   createOrder,
   deleteMenuItem,
   deleteRecipe,
   fetchMenuItems,
   fetchPublicMenuItems,
+  fetchOrderStatus,
   fetchOrders,
+  fetchStaffCall,
+  fetchStaffCalls,
   getJoinedName,
+  startCookingOrder,
   type MenuItem,
   type Order,
+  type StaffCall,
 } from "./api/orders";
 import {
   clearAdminToken,
@@ -23,6 +31,8 @@ import {
   loginAdmin,
   setAdminToken,
 } from "./api/auth";
+
+const CUSTOMER_ORDER_IDS_KEY = "kitchen-stock-customer-order-ids";
 
 export default function App() {
   const path = window.location.pathname.replace(/\/+$/, "") || "/";
@@ -155,14 +165,11 @@ function CustomerOrderPage() {
   const [loading, setLoading] = useState(true);
   const [submittingMenuId, setSubmittingMenuId] = useState<string | null>(null);
   const [cancelingOrderId, setCancelingOrderId] = useState<string | null>(null);
+  const [callingStaff, setCallingStaff] = useState(false);
+  const [staffCalled, setStaffCalled] = useState(false);
+  const [activeStaffCallId, setActiveStaffCallId] = useState<string | null>(null);
+  const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-  const [lastOrder, setLastOrder] = useState<{
-    id: string;
-    menuName: string;
-    createdAt: string;
-  } | null>(null);
-  const [now, setNow] = useState(() => Date.now());
 
   const inputStyle: React.CSSProperties = {
     minHeight: 38,
@@ -208,10 +215,64 @@ function CustomerOrderPage() {
     loadMenus();
   }, []);
 
+  const getStoredCustomerOrderIds = () => {
+    try {
+      const raw = window.localStorage.getItem(CUSTOMER_ORDER_IDS_KEY);
+      return raw ? (JSON.parse(raw) as string[]) : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const saveStoredCustomerOrderIds = (ids: string[]) => {
+    window.localStorage.setItem(CUSTOMER_ORDER_IDS_KEY, JSON.stringify(ids));
+  };
+
+  const refreshCustomerOrders = async () => {
+    const ids = getStoredCustomerOrderIds();
+    if (ids.length === 0) {
+      setCustomerOrders([]);
+      return;
+    }
+
+    const results = await Promise.allSettled(
+      ids.map((id) => fetchOrderStatus(id))
+    );
+    const visibleOrders = results
+      .filter(
+        (result): result is PromiseFulfilledResult<Order> =>
+          result.status === "fulfilled"
+      )
+      .map((result) => result.value)
+      .filter((order) => order.status !== "完了");
+
+    setCustomerOrders(visibleOrders);
+    saveStoredCustomerOrderIds(visibleOrders.map((order) => order.id));
+  };
+
   useEffect(() => {
-    const intervalId = window.setInterval(() => setNow(Date.now()), 1000);
+    refreshCustomerOrders();
+    const intervalId = window.setInterval(refreshCustomerOrders, 5000);
     return () => window.clearInterval(intervalId);
   }, []);
+
+  useEffect(() => {
+    if (!activeStaffCallId) return;
+
+    const intervalId = window.setInterval(async () => {
+      try {
+        const call = await fetchStaffCall(activeStaffCallId);
+        if (call.confirmed_at) {
+          setActiveStaffCallId(null);
+          setStaffCalled(false);
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    }, 3000);
+
+    return () => window.clearInterval(intervalId);
+  }, [activeStaffCallId]);
 
   const submitOrder = async (menu: MenuItem) => {
     const quantity = Number(quantityByMenuId[menu.id] ?? "1");
@@ -223,11 +284,10 @@ function CustomerOrderPage() {
     try {
       setSubmittingMenuId(menu.id);
       setError(null);
-      setMessage(null);
-      setLastOrder(null);
       const order = await createOrder({ menu_item_id: menu.id, quantity });
-      setMessage(`「${menu.name}」の注文を受け付けました`);
-      setLastOrder({ id: order.id, menuName: menu.name, createdAt: order.created_at });
+      const orderIds = getStoredCustomerOrderIds();
+      saveStoredCustomerOrderIds([order.id, ...orderIds.filter((id) => id !== order.id)]);
+      await refreshCustomerOrders();
       setQuantityByMenuId((prev) => ({ ...prev, [menu.id]: "1" }));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -236,23 +296,17 @@ function CustomerOrderPage() {
     }
   };
 
-  const canCancelLastOrder = lastOrder
-    ? now - new Date(lastOrder.createdAt).getTime() <= 3 * 60 * 1000
-    : false;
-
-  const cancelLastOrder = async () => {
-    if (!lastOrder) return;
-
+  const callStaffFromCustomerPage = async () => {
     try {
-      setCancelingOrderId(lastOrder.id);
+      setCallingStaff(true);
       setError(null);
-      await cancelOrder(lastOrder.id);
-      setMessage(`「${lastOrder.menuName}」の注文をキャンセルしました`);
-      setLastOrder(null);
+      const call = await createStaffCall();
+      setStaffCalled(true);
+      setActiveStaffCallId(call.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setCancelingOrderId(null);
+      setCallingStaff(false);
     }
   };
 
@@ -281,6 +335,26 @@ function CustomerOrderPage() {
         <p style={{ margin: "0 0 20px", color: "#4b5563" }}>
           メニューと数量を選んで注文できます。
         </p>
+        <button
+          onClick={callStaffFromCustomerPage}
+          disabled={callingStaff || staffCalled}
+          style={{
+            marginBottom: 16,
+            color: "#92400e",
+            backgroundColor: "#fff7ed",
+            border: "1px solid #fdba74",
+            borderRadius: 6,
+            fontWeight: 700,
+            padding: "10px 14px",
+            cursor: staffCalled ? "default" : "pointer",
+          }}
+        >
+          {staffCalled
+            ? "スタッフ呼び出し済み"
+            : callingStaff
+              ? "呼び出し中..."
+              : "スタッフを呼ぶ"}
+        </button>
 
         {loading && <p>読み込み中...</p>}
         {error && (
@@ -288,43 +362,66 @@ function CustomerOrderPage() {
             エラー: {error}
           </p>
         )}
-        {message && (
-          <div
+        {customerOrders.length > 0 && (
+          <section
             style={{
-              color: "#166534",
-              background: "#dcfce7",
-              border: "1px solid #86efac",
-              borderRadius: 8,
+              marginBottom: 16,
               padding: 12,
+              border: "1px solid #ddd",
+              borderRadius: 8,
+              background: "#f9fafb",
             }}
           >
-            <p style={{ margin: 0 }}>{message}</p>
-            {lastOrder && canCancelLastOrder && (
-              <button
-                onClick={cancelLastOrder}
-                disabled={cancelingOrderId === lastOrder.id}
-                style={{
-                  marginTop: 10,
-                  color: "#991b1b",
-                  backgroundColor: "#fff",
-                  border: "1px solid #fca5a5",
-                  borderRadius: 6,
-                  fontWeight: 700,
-                  padding: "8px 10px",
-                  cursor: "pointer",
-                }}
-              >
-                {cancelingOrderId === lastOrder.id
-                  ? "キャンセル中..."
-                  : "注文をキャンセル"}
-              </button>
-            )}
-            {lastOrder && !canCancelLastOrder && (
-              <p style={{ margin: "10px 0 0", color: "#92400e" }}>
-                注文から時間が経過したため、画面からはキャンセルできません。スタッフにお声がけください。
-              </p>
-            )}
-          </div>
+            <h2 style={{ margin: "0 0 8px", fontSize: 18 }}>注文リスト</h2>
+            <ul style={{ margin: 0, paddingLeft: 20 }}>
+              {customerOrders.map((order) => {
+                const canCancel =
+                  order.status === "調理待ち";
+
+                return (
+                  <li key={order.id} style={{ marginBottom: 8 }}>
+                    <div>
+                      <strong>{getJoinedName(order.menu_items)}</strong> × {order.quantity}
+                    </div>
+                    <div style={{ fontSize: 14, color: "#4b5563" }}>
+                      状態: {order.status}
+                    </div>
+                    {canCancel && (
+                      <button
+                        onClick={async () => {
+                          try {
+                            setCancelingOrderId(order.id);
+                            setError(null);
+                            await cancelOrder(order.id);
+                            await refreshCustomerOrders();
+                          } catch (e) {
+                            setError(e instanceof Error ? e.message : String(e));
+                          } finally {
+                            setCancelingOrderId(null);
+                          }
+                        }}
+                        disabled={cancelingOrderId === order.id}
+                        style={{
+                          marginTop: 6,
+                          color: "#991b1b",
+                          backgroundColor: "#fff",
+                          border: "1px solid #fca5a5",
+                          borderRadius: 6,
+                          fontWeight: 700,
+                          padding: "6px 8px",
+                          cursor: "pointer",
+                        }}
+                      >
+                        {cancelingOrderId === order.id
+                          ? "キャンセル中..."
+                          : "注文をキャンセル"}
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
         )}
 
         {!loading && menuItems.length === 0 ? (
@@ -399,6 +496,7 @@ function AdminApp({ onLogout }: { onLogout: () => void }) {
   const [wasteSummaries, setWasteSummaries] = useState<WasteSummary[]>([]);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [staffCalls, setStaffCalls] = useState<StaffCall[]>([]);
 
   const [newMenuName, setNewMenuName] = useState("");
   const [recipeMenuId, setRecipeMenuId] = useState("");
@@ -407,7 +505,7 @@ function AdminApp({ onLogout }: { onLogout: () => void }) {
   const [orderMenuId, setOrderMenuId] = useState("");
   const [orderQuantity, setOrderQuantity] = useState("1");
   const [expandedRecipeMenuId, setExpandedRecipeMenuId] = useState<string | null>(null);
-  const [orderTab, setOrderTab] = useState<"received" | "canceled" | "manual" | "recipes">("received");
+  const [orderTab, setOrderTab] = useState<"received" | "canceled" | "staff-calls" | "manual" | "recipes">("received");
 
   const [editingId, setEditingId] = useState<string | null>(null);
 const [editName, setEditName] = useState("");
@@ -496,12 +594,14 @@ const cancelEdit = () => {
     try {
       setLoading(true);
       setError(null);
-      const [menuData, orderData] = await Promise.all([
+      const [menuData, orderData, staffCallData] = await Promise.all([
         fetchMenuItems(),
         fetchOrders(),
+        fetchStaffCalls(),
       ]);
       setMenuItems(menuData);
       setOrders(orderData);
+      setStaffCalls(staffCallData);
 
       if (!recipeMenuId && menuData.length > 0) {
         setRecipeMenuId(menuData[0].id);
@@ -512,6 +612,7 @@ const cancelEdit = () => {
     } catch (e) {
       setMenuItems([]);
       setOrders([]);
+      setStaffCalls([]);
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
@@ -692,10 +793,78 @@ const cancelEdit = () => {
     }
   };
 
-  const pendingOrders = orders.filter((order) => order.status === "調理中");
+  const pendingOrders = orders.filter(
+    (order) => order.status === "調理待ち" || order.status === "調理中"
+  );
   const canceledOrders = orders.filter(
     (order) => order.status === "キャンセル" && !order.cancel_confirmed_at
   );
+  const staffCallOrders = orders.filter(
+    (order) => order.staff_called_at && !order.staff_call_confirmed_at
+  );
+  const staffCallCount = staffCallOrders.length + staffCalls.length;
+  const itemsById = new Map(items.map((item) => [item.id, item]));
+
+  const getMenuAvailability = (menu: MenuItem) => {
+    const ingredientMap = new Map<
+      string,
+      {
+        itemId: string;
+        name: string;
+        unit: string;
+        requiredQty: number;
+        currentStock: number;
+      }
+    >();
+
+    for (const recipe of menu.recipes) {
+      const item = itemsById.get(recipe.item_id);
+      const joinedName = getJoinedName(recipe.items);
+      const current = ingredientMap.get(recipe.item_id);
+      const quantity = Number(recipe.quantity);
+
+      ingredientMap.set(recipe.item_id, {
+        itemId: recipe.item_id,
+        name: item?.name ?? joinedName,
+        unit: item?.unit ?? "",
+        requiredQty: (current?.requiredQty ?? 0) + quantity,
+        currentStock: getDisplayStock(item?.current_stock ?? 0),
+      });
+    }
+
+    const ingredients = Array.from(ingredientMap.values()).map((ingredient) => ({
+      ...ingredient,
+      possible:
+        ingredient.requiredQty > 0
+          ? Math.max(0, Math.floor(ingredient.currentStock / ingredient.requiredQty))
+          : 0,
+    }));
+
+    const servings =
+      ingredients.length === 0
+        ? null
+        : Math.min(...ingredients.map((ingredient) => ingredient.possible));
+
+    return { servings, ingredients };
+  };
+
+  const getAvailabilityColor = (servings: number | null) => {
+    if (servings === null) return "#4b5563";
+    if (servings === 0) return "#dc2626";
+    if (servings <= 5) return "#f97316";
+    return "#166534";
+  };
+
+  const getDisplayStock = (stock: number) => Math.max(0, stock);
+
+  const getStockColor = (stock: number, parLevel: number | null) => {
+    const displayStock = getDisplayStock(stock);
+    if (displayStock === 0) return "#dc2626";
+    if (parLevel !== null && parLevel > 0 && displayStock <= parLevel * 0.3) {
+      return "#f97316";
+    }
+    return "#166534";
+  };
 
   const addMenu = async () => {
     const name = newMenuName.trim();
@@ -782,10 +951,40 @@ const cancelEdit = () => {
     }
   };
 
+  const startCooking = async (orderId: string) => {
+    try {
+      setError(null);
+      await startCookingOrder(orderId);
+      await loadOrderData();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   const confirmCancellation = async (orderId: string) => {
     try {
       setError(null);
       await confirmOrderCancellation(orderId);
+      await loadOrderData();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const markStaffCallConfirmed = async (orderId: string) => {
+    try {
+      setError(null);
+      await confirmStaffCall(orderId);
+      await loadOrderData();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const markStandaloneStaffCallConfirmed = async (callId: string) => {
+    try {
+      setError(null);
+      await confirmStandaloneStaffCall(callId);
       await loadOrderData();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -860,11 +1059,32 @@ const buttonStyle: React.CSSProperties = {
 
 const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
   ...buttonStyle,
+  position: "relative",
   padding: "10px 14px",
   borderColor: selected ? "#2563eb" : "#9ca3af",
   backgroundColor: selected ? "#eff6ff" : "#fff",
   color: "#111827",
 });
+
+const notificationBadgeStyle: React.CSSProperties = {
+  position: "absolute",
+  top: -8,
+  right: -8,
+  minWidth: 22,
+  height: 22,
+  padding: "0 6px",
+  borderRadius: 999,
+  background: "#dc2626",
+  color: "#fff",
+  fontSize: 12,
+  fontWeight: 800,
+  lineHeight: "22px",
+  textAlign: "center",
+  boxShadow: "0 0 0 2px #fff",
+};
+
+const notificationBadge = (count: number) =>
+  count > 0 ? <span style={notificationBadgeStyle}>{count}</span> : null;
 
 
   return (
@@ -1055,13 +1275,21 @@ const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
             style={tabButtonStyle(orderTab === "received")}
           >
             受注一覧
+            {notificationBadge(pendingOrders.length)}
           </button>
           <button
             onClick={() => setOrderTab("canceled")}
             style={tabButtonStyle(orderTab === "canceled")}
           >
             キャンセル通知
-            {canceledOrders.length > 0 && ` (${canceledOrders.length})`}
+            {notificationBadge(canceledOrders.length)}
+          </button>
+          <button
+            onClick={() => setOrderTab("staff-calls")}
+            style={tabButtonStyle(orderTab === "staff-calls")}
+          >
+            呼び出し通知
+            {notificationBadge(staffCallCount)}
           </button>
           <button
             onClick={() => setOrderTab("manual")}
@@ -1194,14 +1422,29 @@ const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
               <ul style={{ margin: 0, paddingLeft: 20 }}>
                 {pendingOrders.map((order) => (
                   <li key={order.id} style={{ marginBottom: 8 }}>
-                    {getJoinedName(order.menu_items)} × {order.quantity}
-                    <button
-                      onClick={() => finishOrder(order.id)}
-                      disabled={loading}
-                      style={{ marginLeft: 8 }}
-                    >
-                    完了して使用
-                    </button>
+                    <div>
+                      <strong>{getJoinedName(order.menu_items)}</strong> × {order.quantity}
+                    </div>
+                    <div style={{ fontSize: 14, color: "#4b5563" }}>
+                      状態: {order.status}
+                    </div>
+                    {order.status === "調理待ち" ? (
+                      <button
+                        onClick={() => startCooking(order.id)}
+                        disabled={loading}
+                        style={{ marginTop: 6 }}
+                      >
+                        調理開始
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => finishOrder(order.id)}
+                        disabled={loading}
+                        style={{ marginTop: 6 }}
+                      >
+                        完成
+                      </button>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -1239,6 +1482,54 @@ const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
             )}
           </div>
           )}
+
+          {orderTab === "staff-calls" && (
+          <div>
+            <h3 style={{ margin: "16px 0 8px", fontSize: 16 }}>呼び出し通知</h3>
+            {staffCallCount === 0 ? (
+              <p style={{ margin: 0 }}>未確認の呼び出しはありません</p>
+            ) : (
+              <ul style={{ margin: 0, paddingLeft: 20 }}>
+                {staffCalls.map((call) => (
+                  <li key={call.id} style={{ marginBottom: 10 }}>
+                    <div>
+                      <strong>スタッフ呼び出し</strong>
+                    </div>
+                    <div style={{ fontSize: 14, color: "#4b5563" }}>
+                      呼び出し: {new Date(call.created_at).toLocaleString()}
+                    </div>
+                    <button
+                      onClick={() => markStandaloneStaffCallConfirmed(call.id)}
+                      disabled={loading}
+                      style={{ marginTop: 6 }}
+                    >
+                      確認済みにする
+                    </button>
+                  </li>
+                ))}
+                {staffCallOrders.map((order) => (
+                  <li key={order.id} style={{ marginBottom: 10 }}>
+                    <div>
+                      <strong>{getJoinedName(order.menu_items)}</strong> × {order.quantity}
+                    </div>
+                    <div style={{ fontSize: 14, color: "#4b5563" }}>
+                      注文: {new Date(order.created_at).toLocaleString()}
+                      {order.staff_called_at &&
+                        ` / 呼び出し: ${new Date(order.staff_called_at).toLocaleString()}`}
+                    </div>
+                    <button
+                      onClick={() => markStaffCallConfirmed(order.id)}
+                      disabled={loading}
+                      style={{ marginTop: 6 }}
+                    >
+                      確認済みにする
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          )}
         </div>
 
         {orderTab === "recipes" && menuItems.length > 0 && (
@@ -1253,6 +1544,7 @@ const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
             >
               {menuItems.map((menu) => {
                 const expanded = expandedRecipeMenuId === menu.id;
+                const availability = getMenuAvailability(menu);
 
                 return (
                   <div
@@ -1288,6 +1580,18 @@ const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
                         <span style={{ marginLeft: 8, fontSize: 13, color: "#4b5563" }}>
                           {menu.recipes.length}品
                         </span>
+                        {availability.servings !== null && (
+                          <span
+                            style={{
+                              marginLeft: 8,
+                              fontSize: 13,
+                              color: getAvailabilityColor(availability.servings),
+                              fontWeight: 700,
+                            }}
+                          >
+                            作成可能: {availability.servings}件
+                          </span>
+                        )}
                       </button>
                       <button
                         onClick={() => removeMenu(menu)}
@@ -1302,6 +1606,39 @@ const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
                       (menu.recipes.length === 0 ? (
                         <p style={{ margin: "8px 0 0" }}>レシピ未登録</p>
                       ) : (
+                        <>
+                        <div
+                          style={{
+                            marginTop: 10,
+                            padding: 10,
+                            borderRadius: 8,
+                            background: "#f9fafb",
+                            border: "1px solid #e5e7eb",
+                          }}
+                        >
+                          <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                            単独作成可能:{" "}
+                            <span
+                              style={{
+                                color: getAvailabilityColor(availability.servings),
+                              }}
+                            >
+                              {availability.servings ?? 0}件
+                            </span>
+                          </div>
+                          <ul style={{ margin: 0, paddingLeft: 20 }}>
+                            {availability.ingredients.map((ingredient) => (
+                              <li key={ingredient.itemId} style={{ marginBottom: 4 }}>
+                                {ingredient.name}: 在庫 {ingredient.currentStock}
+                                {ingredient.unit} / 1件 {ingredient.requiredQty}
+                                {ingredient.unit}
+                              </li>
+                            ))}
+                          </ul>
+                          <p style={{ margin: "6px 0 0", fontSize: 13, color: "#4b5563" }}>
+                            同じ食材を使う別メニューと同時に作る場合、作成可能数は変わります。
+                          </p>
+                        </div>
                         <ul style={{ margin: "8px 0 0", paddingLeft: 20 }}>
                           {menu.recipes.map((recipe) => (
                             <li key={recipe.id} style={{ marginBottom: 6 }}>
@@ -1324,6 +1661,7 @@ const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
                             </li>
                           ))}
                         </ul>
+                        </>
                       ))}
                   </div>
                 );
@@ -1618,7 +1956,11 @@ const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
 
             <td style={tdStyle}>{item.category || "未分類"}</td>
 
-            <td style={tdStyle}>{item.current_stock}</td>
+            <td style={tdStyle}>
+              <strong style={{ color: getStockColor(item.current_stock, item.par_level) }}>
+                {getDisplayStock(item.current_stock)}
+              </strong>
+            </td>
 
             <td style={tdStyle}>
               {editingId === item.id ? (

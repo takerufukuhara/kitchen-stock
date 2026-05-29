@@ -89,7 +89,7 @@ app.get("/items", requireAdmin, async (_req, res) => {
     // itemsにcurrent_stock追加
     const result = (items ?? []).map((item) => ({
       ...item,
-      current_stock: stockMap.get(item.id) ?? 0,
+      current_stock: Math.max(0, stockMap.get(item.id) ?? 0),
     }));
 
     res.json(result);
@@ -378,11 +378,73 @@ app.get("/orders", requireAdmin, async (_req, res) => {
   try {
     const { data, error } = await supabase
       .from("orders")
-      .select("id,menu_item_id,quantity,status,created_at,completed_at,cancelled_at,cancel_confirmed_at,menu_items(name)")
+      .select("id,menu_item_id,quantity,status,created_at,completed_at,cancelled_at,cancel_confirmed_at,staff_called_at,staff_call_confirmed_at,menu_items(name)")
       .order("created_at", { ascending: false });
 
     if (error) return res.status(500).json({ error: error.message });
     res.json(data ?? []);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.get("/staff-calls", requireAdmin, async (_req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("staff_calls")
+      .select("id,created_at,confirmed_at")
+      .is("confirmed_at", null)
+      .order("created_at", { ascending: false });
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data ?? []);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.get("/staff-calls/:id", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("staff_calls")
+      .select("id,created_at,confirmed_at")
+      .eq("id", req.params.id)
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    if (!data) return res.status(404).json({ error: "呼び出しが見つかりません" });
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.post("/staff-calls", async (_req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("staff_calls")
+      .insert([{}])
+      .select()
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.status(201).json(data);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.patch("/staff-calls/:id/confirm", requireAdmin, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("staff_calls")
+      .update({ confirmed_at: new Date().toISOString() })
+      .eq("id", req.params.id)
+      .select()
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
   } catch (e) {
     res.status(500).json({ error: String(e) });
   }
@@ -403,7 +465,7 @@ app.post("/orders", async (req, res) => {
         {
           menu_item_id,
           quantity: numericQuantity,
-          status: "調理中",
+          status: "調理待ち",
         },
       ])
       .select()
@@ -416,30 +478,36 @@ app.post("/orders", async (req, res) => {
   }
 });
 
+app.get("/orders/:id/status", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("orders")
+      .select("id,quantity,status,created_at,completed_at,cancelled_at,menu_items(name)")
+      .eq("id", req.params.id)
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    if (!data) return res.status(404).json({ error: "注文が見つかりません" });
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
 app.patch("/orders/:id/cancel", async (req, res) => {
   try {
     const orderId = req.params.id;
 
     const { data: order, error: orderError } = await supabase
       .from("orders")
-      .select("id,status,created_at")
+      .select("id,status")
       .eq("id", orderId)
       .single();
 
     if (orderError) return res.status(500).json({ error: orderError.message });
     if (!order) return res.status(404).json({ error: "注文が見つかりません" });
-    if (order.status === "完了") {
-      return res.status(400).json({ error: "完了済みの注文はキャンセルできません" });
-    }
-    if (order.status === "キャンセル") {
-      return res.status(400).json({ error: "この注文はすでにキャンセルされています" });
-    }
-    const createdAtMs = new Date(order.created_at).getTime();
-    const cancelLimitMs = 3 * 60 * 1000;
-    if (Date.now() - createdAtMs > cancelLimitMs) {
-      return res.status(400).json({
-        error: "注文から時間が経過しているため、画面からはキャンセルできません。スタッフにお声がけください。",
-      });
+    if (order.status !== "調理待ち") {
+      return res.status(400).json({ error: "調理待ちの注文だけキャンセルできます" });
     }
 
     const { data, error } = await supabase
@@ -462,7 +530,7 @@ app.patch("/orders/:id/confirm-cancel", requireAdmin, async (req, res) => {
 
     const { data: order, error: orderError } = await supabase
       .from("orders")
-      .select("id,status")
+      .select("id,menu_item_id,quantity,status,menu_items(name)")
       .eq("id", orderId)
       .single();
 
@@ -486,7 +554,7 @@ app.patch("/orders/:id/confirm-cancel", requireAdmin, async (req, res) => {
   }
 });
 
-app.patch("/orders/:id/complete", requireAdmin, async (req, res) => {
+app.patch("/orders/:id/call-staff", async (req, res) => {
   try {
     const orderId = req.params.id;
 
@@ -499,7 +567,55 @@ app.patch("/orders/:id/complete", requireAdmin, async (req, res) => {
     if (orderError) return res.status(500).json({ error: orderError.message });
     if (!order) return res.status(404).json({ error: "注文が見つかりません" });
     if (order.status !== "調理中") {
-      return res.status(400).json({ error: "調理中の注文だけ完了できます" });
+      return res.status(400).json({ error: "調理中の注文だけスタッフを呼べます" });
+    }
+
+    const { data, error } = await supabase
+      .from("orders")
+      .update({ staff_called_at: new Date().toISOString() })
+      .eq("id", orderId)
+      .select()
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.patch("/orders/:id/confirm-staff-call", requireAdmin, async (req, res) => {
+  try {
+    const orderId = req.params.id;
+
+    const { data, error } = await supabase
+      .from("orders")
+      .update({ staff_call_confirmed_at: new Date().toISOString() })
+      .eq("id", orderId)
+      .select()
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.patch("/orders/:id/start-cooking", requireAdmin, async (req, res) => {
+  try {
+    const orderId = req.params.id;
+
+    const { data: order, error: orderError } = await supabase
+      .from("orders")
+      .select("id,menu_item_id,quantity,status,menu_items(name)")
+      .eq("id", orderId)
+      .single();
+
+    if (orderError) return res.status(500).json({ error: orderError.message });
+    if (!order) return res.status(404).json({ error: "注文が見つかりません" });
+    if (order.status !== "調理待ち") {
+      return res.status(400).json({ error: "調理待ちの注文だけ調理開始できます" });
     }
 
     const { data: recipes, error: recipesError } = await supabase
@@ -529,6 +645,36 @@ app.patch("/orders/:id/complete", requireAdmin, async (req, res) => {
       .insert(movements);
 
     if (insertError) return res.status(500).json({ error: insertError.message });
+
+    const { data, error } = await supabase
+      .from("orders")
+      .update({ status: "調理中" })
+      .eq("id", orderId)
+      .select()
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.patch("/orders/:id/complete", requireAdmin, async (req, res) => {
+  try {
+    const orderId = req.params.id;
+
+    const { data: order, error: orderError } = await supabase
+      .from("orders")
+      .select("id,menu_item_id,quantity,status,menu_items(name)")
+      .eq("id", orderId)
+      .single();
+
+    if (orderError) return res.status(500).json({ error: orderError.message });
+    if (!order) return res.status(404).json({ error: "注文が見つかりません" });
+    if (order.status !== "調理中") {
+      return res.status(400).json({ error: "調理中の注文だけ完了できます" });
+    }
 
     const { data: completed, error: completeError } = await supabase
       .from("orders")

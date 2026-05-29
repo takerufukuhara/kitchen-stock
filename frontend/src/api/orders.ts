@@ -26,12 +26,20 @@ export type Order = {
   id: string;
   menu_item_id: string;
   quantity: number;
-  status: "調理中" | "完了" | "キャンセル";
+  status: "調理待ち" | "調理中" | "完了" | "キャンセル";
   created_at: string;
   completed_at: string | null;
   cancelled_at: string | null;
   cancel_confirmed_at: string | null;
+  staff_called_at: string | null;
+  staff_call_confirmed_at: string | null;
   menu_items?: { name: string } | { name: string }[] | null;
+};
+
+export type StaffCall = {
+  id: string;
+  created_at: string;
+  confirmed_at: string | null;
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -117,8 +125,19 @@ export async function createOrder(params: {
   });
 }
 
+export async function fetchOrderStatus(id: string): Promise<Order> {
+  return request<Order>(`/orders/${id}/status`);
+}
+
 export async function completeOrder(id: string): Promise<Order> {
   return request<Order>(`/orders/${id}/complete`, {
+    method: "PATCH",
+    headers: adminHeaders(),
+  });
+}
+
+export async function startCookingOrder(id: string): Promise<Order> {
+  return request<Order>(`/orders/${id}/start-cooking`, {
     method: "PATCH",
     headers: adminHeaders(),
   });
@@ -132,6 +151,42 @@ export async function cancelOrder(id: string): Promise<Order> {
 
 export async function confirmOrderCancellation(id: string): Promise<Order> {
   return request<Order>(`/orders/${id}/confirm-cancel`, {
+    method: "PATCH",
+    headers: adminHeaders(),
+  });
+}
+
+export async function callStaff(id: string): Promise<Order> {
+  return request<Order>(`/orders/${id}/call-staff`, {
+    method: "PATCH",
+  });
+}
+
+export async function confirmStaffCall(id: string): Promise<Order> {
+  return request<Order>(`/orders/${id}/confirm-staff-call`, {
+    method: "PATCH",
+    headers: adminHeaders(),
+  });
+}
+
+export async function createStaffCall(): Promise<StaffCall> {
+  return request<StaffCall>("/staff-calls", {
+    method: "POST",
+  });
+}
+
+export async function fetchStaffCall(id: string): Promise<StaffCall> {
+  return request<StaffCall>(`/staff-calls/${id}`);
+}
+
+export async function fetchStaffCalls(): Promise<StaffCall[]> {
+  return request<StaffCall[]>("/staff-calls", {
+    headers: adminHeaders(),
+  });
+}
+
+export async function confirmStandaloneStaffCall(id: string): Promise<StaffCall> {
+  return request<StaffCall>(`/staff-calls/${id}/confirm`, {
     method: "PATCH",
     headers: adminHeaders(),
   });
