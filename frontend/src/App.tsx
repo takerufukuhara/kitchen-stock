@@ -627,7 +627,9 @@ function AdminApp({ onLogout }: { onLogout: () => void }) {
   const [orderMenuId, setOrderMenuId] = useState("");
   const [orderQuantity, setOrderQuantity] = useState("1");
   const [expandedRecipeMenuId, setExpandedRecipeMenuId] = useState<string | null>(null);
-  const [orderTab, setOrderTab] = useState<"received" | "canceled" | "staff-calls" | "manual" | "recipes">("received");
+  const [orderTab, setOrderTab] = useState<
+    "received" | "history" | "canceled" | "staff-calls" | "manual" | "recipes"
+  >("received");
 
   const [editingId, setEditingId] = useState<string | null>(null);
 const [editName, setEditName] = useState("");
@@ -924,22 +926,30 @@ const cancelEdit = () => {
       : order.customer_groups;
     return group?.label?.trim() || "未設定グループ";
   };
-  const pendingOrderGroups = Array.from(
-    pendingOrders.reduce(
-      (map, order) => {
-        const key = order.customer_group_id ?? "no-group";
-        const current = map.get(key) ?? {
-          id: key,
-          label: getCustomerGroupLabel(order),
-          orders: [] as Order[],
-        };
-        current.orders.push(order);
-        map.set(key, current);
-        return map;
-      },
-      new Map<string, { id: string; label: string; orders: Order[] }>()
-    ).values()
+
+  const groupOrdersByCustomer = (targetOrders: Order[]) =>
+    Array.from(
+      targetOrders.reduce(
+        (map, order) => {
+          const key = order.customer_group_id ?? "no-group";
+          const current = map.get(key) ?? {
+            id: key,
+            label: getCustomerGroupLabel(order),
+            orders: [] as Order[],
+          };
+          current.orders.push(order);
+          map.set(key, current);
+          return map;
+        },
+        new Map<string, { id: string; label: string; orders: Order[] }>()
+      ).values()
+    );
+
+  const pendingOrderGroups = groupOrdersByCustomer(pendingOrders);
+  const historyOrders = orders.filter(
+    (order) => order.status === "完了" || order.status === "キャンセル"
   );
+  const historyOrderGroups = groupOrdersByCustomer(historyOrders);
   const canceledOrders = orders.filter(
     (order) => order.status === "キャンセル" && !order.cancel_confirmed_at
   );
@@ -948,6 +958,19 @@ const cancelEdit = () => {
   );
   const staffCallCount = staffCallOrders.length + staffCalls.length;
   const itemsById = new Map(items.map((item) => [item.id, item]));
+
+  const formatOrderDate = (value: string | null) =>
+    value ? new Date(value).toLocaleString() : "";
+
+  const getOrderHistoryDateLabel = (order: Order) => {
+    if (order.status === "完了") {
+      return `完了: ${formatOrderDate(order.completed_at)}`;
+    }
+    if (order.status === "キャンセル") {
+      return `キャンセル: ${formatOrderDate(order.cancelled_at)}`;
+    }
+    return `注文: ${formatOrderDate(order.created_at)}`;
+  };
 
   const getMenuAvailability = (menu: MenuItem) => {
     const ingredientMap = new Map<
@@ -1422,6 +1445,12 @@ const notificationBadge = (count: number) =>
             {notificationBadge(pendingOrders.length)}
           </button>
           <button
+            onClick={() => setOrderTab("history")}
+            style={tabButtonStyle(orderTab === "history")}
+          >
+            注文履歴
+          </button>
+          <button
             onClick={() => setOrderTab("canceled")}
             style={tabButtonStyle(orderTab === "canceled")}
           >
@@ -1603,6 +1632,45 @@ const notificationBadge = (count: number) =>
                               完成
                             </button>
                           )}
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                ))}
+              </div>
+            )}
+          </div>
+          )}
+
+          {orderTab === "history" && (
+          <div>
+            <h3 style={{ margin: "16px 0 8px", fontSize: 16 }}>注文履歴</h3>
+            {historyOrders.length === 0 ? (
+              <p style={{ margin: 0 }}>完了・キャンセル済みの注文はありません</p>
+            ) : (
+              <div style={{ display: "grid", gap: 12 }}>
+                {historyOrderGroups.map((group) => (
+                  <section
+                    key={group.id}
+                    style={{
+                      border: "1px solid #ddd",
+                      borderRadius: 8,
+                      padding: 12,
+                      backgroundColor: "#f9fafb",
+                    }}
+                  >
+                    <h4 style={{ margin: "0 0 8px", fontSize: 15 }}>
+                      {group.label}
+                    </h4>
+                    <ul style={{ margin: 0, paddingLeft: 20 }}>
+                      {group.orders.map((order) => (
+                        <li key={order.id} style={{ marginBottom: 8 }}>
+                          <div>
+                            <strong>{getJoinedName(order.menu_items)}</strong> × {order.quantity}
+                          </div>
+                          <div style={{ fontSize: 14, color: "#4b5563" }}>
+                            状態: {order.status} / {getOrderHistoryDateLabel(order)}
+                          </div>
                         </li>
                       ))}
                     </ul>
