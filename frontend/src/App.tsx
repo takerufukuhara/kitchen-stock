@@ -8,11 +8,13 @@ import {
   confirmStandaloneStaffCall,
   confirmOrderCancellation,
   confirmStaffCall,
+  createCustomerGroup,
   createStaffCall,
   createMenuItem,
   createOrder,
   deleteMenuItem,
   deleteRecipe,
+  fetchCustomerGroup,
   fetchMenuItems,
   fetchPublicMenuItems,
   fetchOrderStatus,
@@ -21,6 +23,7 @@ import {
   fetchStaffCalls,
   getJoinedName,
   startCookingOrder,
+  type CustomerGroup,
   type MenuItem,
   type Order,
   type StaffCall,
@@ -33,6 +36,7 @@ import {
 } from "./api/auth";
 
 const CUSTOMER_ORDER_IDS_KEY = "kitchen-stock-customer-order-ids";
+const CUSTOMER_GROUP_ID_KEY = "kitchen-stock-customer-group-id";
 
 export default function App() {
   const path = window.location.pathname.replace(/\/+$/, "") || "/";
@@ -168,6 +172,9 @@ function CustomerOrderPage() {
   const [callingStaff, setCallingStaff] = useState(false);
   const [staffCalled, setStaffCalled] = useState(false);
   const [activeStaffCallId, setActiveStaffCallId] = useState<string | null>(null);
+  const [customerGroup, setCustomerGroup] = useState<CustomerGroup | null>(null);
+  const [groupLabel, setGroupLabel] = useState("");
+  const [creatingGroup, setCreatingGroup] = useState(false);
   const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -228,6 +235,46 @@ function CustomerOrderPage() {
     window.localStorage.setItem(CUSTOMER_ORDER_IDS_KEY, JSON.stringify(ids));
   };
 
+  useEffect(() => {
+    const loadCustomerGroup = async () => {
+      const groupId = window.localStorage.getItem(CUSTOMER_GROUP_ID_KEY);
+      if (!groupId) return;
+
+      try {
+        const group = await fetchCustomerGroup(groupId);
+        setCustomerGroup(group);
+        setGroupLabel(group.label ?? "");
+      } catch {
+        window.localStorage.removeItem(CUSTOMER_GROUP_ID_KEY);
+      }
+    };
+
+    loadCustomerGroup();
+  }, []);
+
+  const startCustomerGroup = async () => {
+    try {
+      setCreatingGroup(true);
+      setError(null);
+      const group = await createCustomerGroup(groupLabel);
+      window.localStorage.setItem(CUSTOMER_GROUP_ID_KEY, group.id);
+      setCustomerGroup(group);
+      setGroupLabel(group.label ?? "");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCreatingGroup(false);
+    }
+  };
+
+  const resetCustomerGroup = () => {
+    window.localStorage.removeItem(CUSTOMER_GROUP_ID_KEY);
+    window.localStorage.removeItem(CUSTOMER_ORDER_IDS_KEY);
+    setCustomerGroup(null);
+    setCustomerOrders([]);
+    setGroupLabel("");
+  };
+
   const refreshCustomerOrders = async () => {
     const ids = getStoredCustomerOrderIds();
     if (ids.length === 0) {
@@ -275,6 +322,11 @@ function CustomerOrderPage() {
   }, [activeStaffCallId]);
 
   const submitOrder = async (menu: MenuItem) => {
+    if (!customerGroup) {
+      setError("先にお客様グループを作成してください");
+      return;
+    }
+
     const quantity = Number(quantityByMenuId[menu.id] ?? "1");
     if (!Number.isFinite(quantity) || quantity <= 0) {
       setError("数量は1以上の数値を入力してください");
@@ -284,7 +336,11 @@ function CustomerOrderPage() {
     try {
       setSubmittingMenuId(menu.id);
       setError(null);
-      const order = await createOrder({ menu_item_id: menu.id, quantity });
+      const order = await createOrder({
+        menu_item_id: menu.id,
+        quantity,
+        customer_group_id: customerGroup.id,
+      });
       const orderIds = getStoredCustomerOrderIds();
       saveStoredCustomerOrderIds([order.id, ...orderIds.filter((id) => id !== order.id)]);
       await refreshCustomerOrders();
@@ -355,6 +411,72 @@ function CustomerOrderPage() {
               ? "呼び出し中..."
               : "スタッフを呼ぶ"}
         </button>
+
+        <section
+          style={{
+            marginBottom: 16,
+            padding: 12,
+            border: "1px solid #ddd",
+            borderRadius: 8,
+            background: "#f9fafb",
+          }}
+        >
+          <h2 style={{ margin: "0 0 8px", fontSize: 18 }}>お客様グループ</h2>
+          {customerGroup ? (
+            <div
+              style={{
+                display: "flex",
+                gap: 8,
+                alignItems: "center",
+                justifyContent: "space-between",
+                flexWrap: "wrap",
+              }}
+            >
+              <strong>{customerGroup.label || "お客様"}</strong>
+              <button
+                type="button"
+                onClick={resetCustomerGroup}
+                style={{
+                  color: "#374151",
+                  backgroundColor: "#fff",
+                  border: "1px solid #d1d5db",
+                  borderRadius: 6,
+                  fontWeight: 700,
+                  padding: "8px 10px",
+                  cursor: "pointer",
+                }}
+              >
+                別グループで注文
+              </button>
+            </div>
+          ) : (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "minmax(0, 1fr) 120px",
+                gap: 8,
+              }}
+            >
+              <input
+                placeholder="例：テーブル1"
+                value={groupLabel}
+                onChange={(e) => setGroupLabel(e.target.value)}
+                style={inputStyle}
+              />
+              <button
+                type="button"
+                onClick={startCustomerGroup}
+                disabled={creatingGroup}
+                style={{
+                  ...buttonStyle,
+                  opacity: creatingGroup ? 0.7 : 1,
+                }}
+              >
+                {creatingGroup ? "作成中..." : "開始"}
+              </button>
+            </div>
+          )}
+        </section>
 
         {loading && <p>読み込み中...</p>}
         {error && (
@@ -458,10 +580,10 @@ function CustomerOrderPage() {
                 />
                 <button
                   onClick={() => submitOrder(menu)}
-                  disabled={submittingMenuId === menu.id}
+                  disabled={submittingMenuId === menu.id || !customerGroup}
                   style={{
                     ...buttonStyle,
-                    opacity: submittingMenuId === menu.id ? 0.7 : 1,
+                    opacity: submittingMenuId === menu.id || !customerGroup ? 0.7 : 1,
                   }}
                 >
                   注文する
@@ -795,6 +917,28 @@ const cancelEdit = () => {
 
   const pendingOrders = orders.filter(
     (order) => order.status === "調理待ち" || order.status === "調理中"
+  );
+  const getCustomerGroupLabel = (order: Order) => {
+    const group = Array.isArray(order.customer_groups)
+      ? order.customer_groups[0]
+      : order.customer_groups;
+    return group?.label?.trim() || "未設定グループ";
+  };
+  const pendingOrderGroups = Array.from(
+    pendingOrders.reduce(
+      (map, order) => {
+        const key = order.customer_group_id ?? "no-group";
+        const current = map.get(key) ?? {
+          id: key,
+          label: getCustomerGroupLabel(order),
+          orders: [] as Order[],
+        };
+        current.orders.push(order);
+        map.set(key, current);
+        return map;
+      },
+      new Map<string, { id: string; label: string; orders: Order[] }>()
+    ).values()
   );
   const canceledOrders = orders.filter(
     (order) => order.status === "キャンセル" && !order.cancel_confirmed_at
@@ -1419,35 +1563,52 @@ const notificationBadge = (count: number) =>
             {pendingOrders.length === 0 ? (
               <p style={{ margin: 0 }}>注文中の商品はありません</p>
             ) : (
-              <ul style={{ margin: 0, paddingLeft: 20 }}>
-                {pendingOrders.map((order) => (
-                  <li key={order.id} style={{ marginBottom: 8 }}>
-                    <div>
-                      <strong>{getJoinedName(order.menu_items)}</strong> × {order.quantity}
-                    </div>
-                    <div style={{ fontSize: 14, color: "#4b5563" }}>
-                      状態: {order.status}
-                    </div>
-                    {order.status === "調理待ち" ? (
-                      <button
-                        onClick={() => startCooking(order.id)}
-                        disabled={loading}
-                        style={{ marginTop: 6 }}
-                      >
-                        調理開始
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => finishOrder(order.id)}
-                        disabled={loading}
-                        style={{ marginTop: 6 }}
-                      >
-                        完成
-                      </button>
-                    )}
-                  </li>
+              <div style={{ display: "grid", gap: 12 }}>
+                {pendingOrderGroups.map((group) => (
+                  <section
+                    key={group.id}
+                    style={{
+                      border: "1px solid #ddd",
+                      borderRadius: 8,
+                      padding: 12,
+                      backgroundColor: "#f9fafb",
+                    }}
+                  >
+                    <h4 style={{ margin: "0 0 8px", fontSize: 15 }}>
+                      {group.label}
+                    </h4>
+                    <ul style={{ margin: 0, paddingLeft: 20 }}>
+                      {group.orders.map((order) => (
+                        <li key={order.id} style={{ marginBottom: 8 }}>
+                          <div>
+                            <strong>{getJoinedName(order.menu_items)}</strong> × {order.quantity}
+                          </div>
+                          <div style={{ fontSize: 14, color: "#4b5563" }}>
+                            状態: {order.status}
+                          </div>
+                          {order.status === "調理待ち" ? (
+                            <button
+                              onClick={() => startCooking(order.id)}
+                              disabled={loading}
+                              style={{ marginTop: 6 }}
+                            >
+                              調理開始
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => finishOrder(order.id)}
+                              disabled={loading}
+                              style={{ marginTop: 6 }}
+                            >
+                              完成
+                            </button>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
                 ))}
-              </ul>
+              </div>
             )}
           </div>
           )}

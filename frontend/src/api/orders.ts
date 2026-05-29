@@ -25,6 +25,7 @@ export type MenuItem = {
 export type Order = {
   id: string;
   menu_item_id: string;
+  customer_group_id: string | null;
   quantity: number;
   status: "調理待ち" | "調理中" | "完了" | "キャンセル";
   created_at: string;
@@ -34,12 +35,20 @@ export type Order = {
   staff_called_at: string | null;
   staff_call_confirmed_at: string | null;
   menu_items?: { name: string } | { name: string }[] | null;
+  customer_groups?: { label: string | null } | { label: string | null }[] | null;
 };
 
 export type StaffCall = {
   id: string;
   created_at: string;
   confirmed_at: string | null;
+};
+
+export type CustomerGroup = {
+  id: string;
+  label: string | null;
+  created_at: string;
+  closed_at: string | null;
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -117,12 +126,25 @@ export async function fetchOrders(): Promise<Order[]> {
 export async function createOrder(params: {
   menu_item_id: string;
   quantity: number;
+  customer_group_id?: string | null;
 }): Promise<Order> {
   return request<Order>("/orders", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(params),
   });
+}
+
+export async function createCustomerGroup(label: string): Promise<CustomerGroup> {
+  return request<CustomerGroup>("/customer-groups", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ label }),
+  });
+}
+
+export async function fetchCustomerGroup(id: string): Promise<CustomerGroup> {
+  return request<CustomerGroup>(`/customer-groups/${id}`);
 }
 
 export async function fetchOrderStatus(id: string): Promise<Order> {

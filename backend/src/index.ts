@@ -378,7 +378,7 @@ app.get("/orders", requireAdmin, async (_req, res) => {
   try {
     const { data, error } = await supabase
       .from("orders")
-      .select("id,menu_item_id,quantity,status,created_at,completed_at,cancelled_at,cancel_confirmed_at,staff_called_at,staff_call_confirmed_at,menu_items(name)")
+      .select("id,menu_item_id,customer_group_id,quantity,status,created_at,completed_at,cancelled_at,cancel_confirmed_at,staff_called_at,staff_call_confirmed_at,menu_items(name),customer_groups(label)")
       .order("created_at", { ascending: false });
 
     if (error) return res.status(500).json({ error: error.message });
@@ -450,9 +450,43 @@ app.patch("/staff-calls/:id/confirm", requireAdmin, async (req, res) => {
   }
 });
 
+app.post("/customer-groups", async (req, res) => {
+  try {
+    const rawLabel = typeof req.body?.label === "string" ? req.body.label.trim() : "";
+    const label = rawLabel || "お客様";
+
+    const { data, error } = await supabase
+      .from("customer_groups")
+      .insert([{ label }])
+      .select("id,label,created_at,closed_at")
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.status(201).json(data);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.get("/customer-groups/:id", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("customer_groups")
+      .select("id,label,created_at,closed_at")
+      .eq("id", req.params.id)
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    if (!data) return res.status(404).json({ error: "お客様グループが見つかりません" });
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
 app.post("/orders", async (req, res) => {
   try {
-    const { menu_item_id, quantity } = req.body ?? {};
+    const { menu_item_id, quantity, customer_group_id } = req.body ?? {};
     const numericQuantity = Number(quantity);
 
     if (!menu_item_id || !Number.isFinite(numericQuantity) || numericQuantity <= 0) {
@@ -465,6 +499,7 @@ app.post("/orders", async (req, res) => {
         {
           menu_item_id,
           quantity: numericQuantity,
+          customer_group_id: customer_group_id || null,
           status: "調理待ち",
         },
       ])
@@ -482,7 +517,7 @@ app.get("/orders/:id/status", async (req, res) => {
   try {
     const { data, error } = await supabase
       .from("orders")
-      .select("id,quantity,status,created_at,completed_at,cancelled_at,menu_items(name)")
+      .select("id,menu_item_id,customer_group_id,quantity,status,created_at,completed_at,cancelled_at,cancel_confirmed_at,staff_called_at,staff_call_confirmed_at,menu_items(name),customer_groups(label)")
       .eq("id", req.params.id)
       .single();
 
