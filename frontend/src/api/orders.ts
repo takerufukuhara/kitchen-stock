@@ -35,7 +35,10 @@ export type Order = {
   staff_called_at: string | null;
   staff_call_confirmed_at: string | null;
   menu_items?: { name: string } | { name: string }[] | null;
-  customer_groups?: { label: string | null } | { label: string | null }[] | null;
+  customer_groups?:
+    | { label: string | null; closed_at?: string | null }
+    | { label: string | null; closed_at?: string | null }[]
+    | null;
 };
 
 export type StaffCall = {
@@ -49,6 +52,11 @@ export type CustomerGroup = {
   label: string | null;
   created_at: string;
   closed_at: string | null;
+};
+
+export type CustomerGroupOption = {
+  label: string;
+  active_group: CustomerGroup | null;
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -143,8 +151,19 @@ export async function createCustomerGroup(label: string): Promise<CustomerGroup>
   });
 }
 
+export async function fetchCustomerGroupOptions(): Promise<CustomerGroupOption[]> {
+  return request<CustomerGroupOption[]>("/customer-groups");
+}
+
 export async function fetchCustomerGroup(id: string): Promise<CustomerGroup> {
   return request<CustomerGroup>(`/customer-groups/${id}`);
+}
+
+export async function checkoutCustomerGroup(id: string): Promise<CustomerGroup> {
+  return request<CustomerGroup>(`/customer-groups/${id}/checkout`, {
+    method: "PATCH",
+    headers: adminHeaders(),
+  });
 }
 
 export async function fetchOrderStatus(id: string): Promise<Order> {

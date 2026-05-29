@@ -4,6 +4,7 @@ import { createStockMovement, fetchStockMovements, deleteStockMovement, fetchWas
 import {
   addRecipe,
   cancelOrder,
+  checkoutCustomerGroup,
   completeOrder,
   confirmStandaloneStaffCall,
   confirmOrderCancellation,
@@ -15,6 +16,7 @@ import {
   deleteMenuItem,
   deleteRecipe,
   fetchCustomerGroup,
+  fetchCustomerGroupOptions,
   fetchMenuItems,
   fetchPublicMenuItems,
   fetchOrderStatus,
@@ -24,6 +26,7 @@ import {
   getJoinedName,
   startCookingOrder,
   type CustomerGroup,
+  type CustomerGroupOption,
   type MenuItem,
   type Order,
   type StaffCall,
@@ -173,7 +176,8 @@ function CustomerOrderPage() {
   const [staffCalled, setStaffCalled] = useState(false);
   const [activeStaffCallId, setActiveStaffCallId] = useState<string | null>(null);
   const [customerGroup, setCustomerGroup] = useState<CustomerGroup | null>(null);
-  const [groupLabel, setGroupLabel] = useState("");
+  const [customerGroupOptions, setCustomerGroupOptions] = useState<CustomerGroupOption[]>([]);
+  const [selectedGroupLabel, setSelectedGroupLabel] = useState("");
   const [creatingGroup, setCreatingGroup] = useState(false);
   const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -235,15 +239,29 @@ function CustomerOrderPage() {
     window.localStorage.setItem(CUSTOMER_ORDER_IDS_KEY, JSON.stringify(ids));
   };
 
+  const refreshCustomerGroupOptions = async () => {
+    const options = await fetchCustomerGroupOptions();
+    setCustomerGroupOptions(options);
+    setSelectedGroupLabel((current) => current || options[0]?.label || "");
+  };
+
   useEffect(() => {
     const loadCustomerGroup = async () => {
       const groupId = window.localStorage.getItem(CUSTOMER_GROUP_ID_KEY);
-      if (!groupId) return;
 
       try {
+        await refreshCustomerGroupOptions();
+
+        if (!groupId) return;
+
         const group = await fetchCustomerGroup(groupId);
+        if (group.closed_at) {
+          resetCustomerGroup();
+          return;
+        }
+
         setCustomerGroup(group);
-        setGroupLabel(group.label ?? "");
+        setSelectedGroupLabel(group.label ?? "");
       } catch {
         window.localStorage.removeItem(CUSTOMER_GROUP_ID_KEY);
       }
@@ -256,10 +274,12 @@ function CustomerOrderPage() {
     try {
       setCreatingGroup(true);
       setError(null);
-      const group = await createCustomerGroup(groupLabel);
+      const label = selectedGroupLabel || customerGroupOptions[0]?.label || "";
+      const group = await createCustomerGroup(label);
       window.localStorage.setItem(CUSTOMER_GROUP_ID_KEY, group.id);
       setCustomerGroup(group);
-      setGroupLabel(group.label ?? "");
+      setSelectedGroupLabel(group.label ?? "");
+      await refreshCustomerGroupOptions();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -272,7 +292,6 @@ function CustomerOrderPage() {
     window.localStorage.removeItem(CUSTOMER_ORDER_IDS_KEY);
     setCustomerGroup(null);
     setCustomerOrders([]);
-    setGroupLabel("");
   };
 
   const refreshCustomerOrders = async () => {
@@ -302,6 +321,27 @@ function CustomerOrderPage() {
     const intervalId = window.setInterval(refreshCustomerOrders, 5000);
     return () => window.clearInterval(intervalId);
   }, []);
+
+  useEffect(() => {
+    if (!customerGroup) return;
+
+    const intervalId = window.setInterval(async () => {
+      try {
+        const group = await fetchCustomerGroup(customerGroup.id);
+        if (group.closed_at) {
+          resetCustomerGroup();
+          await refreshCustomerGroupOptions();
+          return;
+        }
+
+        setCustomerGroup(group);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    }, 5000);
+
+    return () => window.clearInterval(intervalId);
+  }, [customerGroup]);
 
   useEffect(() => {
     if (!activeStaffCallId) return;
@@ -366,6 +406,12 @@ function CustomerOrderPage() {
     }
   };
 
+  const selectedGroupOption = customerGroupOptions.find(
+    (option) => option.label === selectedGroupLabel
+  );
+  const canStartCustomerGroup =
+    Boolean(selectedGroupLabel) && !selectedGroupOption?.active_group;
+
   return (
     <div
       style={{
@@ -421,34 +467,11 @@ function CustomerOrderPage() {
             background: "#f9fafb",
           }}
         >
-          <h2 style={{ margin: "0 0 8px", fontSize: 18 }}>お客様グループ</h2>
+          <h2 style={{ margin: "0 0 8px", fontSize: 18 }}>卓番号</h2>
           {customerGroup ? (
-            <div
-              style={{
-                display: "flex",
-                gap: 8,
-                alignItems: "center",
-                justifyContent: "space-between",
-                flexWrap: "wrap",
-              }}
-            >
-              <strong>{customerGroup.label || "お客様"}</strong>
-              <button
-                type="button"
-                onClick={resetCustomerGroup}
-                style={{
-                  color: "#374151",
-                  backgroundColor: "#fff",
-                  border: "1px solid #d1d5db",
-                  borderRadius: 6,
-                  fontWeight: 700,
-                  padding: "8px 10px",
-                  cursor: "pointer",
-                }}
-              >
-                別グループで注文
-              </button>
-            </div>
+            <p style={{ margin: 0, fontWeight: 700 }}>
+              {customerGroup.label || "お客様"}で注文中
+            </p>
           ) : (
             <div
               style={{
@@ -457,22 +480,32 @@ function CustomerOrderPage() {
                 gap: 8,
               }}
             >
-              <input
-                placeholder="例：テーブル1"
-                value={groupLabel}
-                onChange={(e) => setGroupLabel(e.target.value)}
+              <select
+                value={selectedGroupLabel}
+                onChange={(e) => setSelectedGroupLabel(e.target.value)}
                 style={inputStyle}
-              />
+              >
+                {customerGroupOptions.map((option) => (
+                  <option
+                    key={option.label}
+                    value={option.label}
+                    disabled={Boolean(option.active_group)}
+                  >
+                    {option.label}
+                    {option.active_group ? "（注文中）" : ""}
+                  </option>
+                ))}
+              </select>
               <button
                 type="button"
                 onClick={startCustomerGroup}
-                disabled={creatingGroup}
+                disabled={creatingGroup || !canStartCustomerGroup}
                 style={{
                   ...buttonStyle,
-                  opacity: creatingGroup ? 0.7 : 1,
+                  opacity: creatingGroup || !canStartCustomerGroup ? 0.7 : 1,
                 }}
               >
-                {creatingGroup ? "作成中..." : "開始"}
+                {creatingGroup ? "開始中..." : "注文開始"}
               </button>
             </div>
           )}
@@ -484,7 +517,7 @@ function CustomerOrderPage() {
             エラー: {error}
           </p>
         )}
-        {customerOrders.length > 0 && (
+        {customerGroup && customerOrders.length > 0 && (
           <section
             style={{
               marginBottom: 16,
@@ -546,7 +579,11 @@ function CustomerOrderPage() {
           </section>
         )}
 
-        {!loading && menuItems.length === 0 ? (
+        {!customerGroup ? (
+          <p style={{ margin: 0, color: "#4b5563" }}>
+            卓番号を選んで「注文開始」を押してください。
+          </p>
+        ) : !loading && menuItems.length === 0 ? (
           <p>注文できるメニューはまだありません</p>
         ) : (
           <div style={{ display: "grid", gap: 12 }}>
@@ -927,6 +964,13 @@ const cancelEdit = () => {
     return group?.label?.trim() || "未設定グループ";
   };
 
+  const getCustomerGroupClosedAt = (order: Order) => {
+    const group = Array.isArray(order.customer_groups)
+      ? order.customer_groups[0]
+      : order.customer_groups;
+    return group?.closed_at ?? null;
+  };
+
   const groupOrdersByCustomer = (targetOrders: Order[]) =>
     Array.from(
       targetOrders.reduce(
@@ -935,13 +979,14 @@ const cancelEdit = () => {
           const current = map.get(key) ?? {
             id: key,
             label: getCustomerGroupLabel(order),
+            closedAt: getCustomerGroupClosedAt(order),
             orders: [] as Order[],
           };
           current.orders.push(order);
           map.set(key, current);
           return map;
         },
-        new Map<string, { id: string; label: string; orders: Order[] }>()
+        new Map<string, { id: string; label: string; closedAt: string | null; orders: Order[] }>()
       ).values()
     );
 
@@ -1112,6 +1157,18 @@ const cancelEdit = () => {
       setError(null);
       await completeOrder(orderId);
       await loadItems();
+      await loadOrderData();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const checkoutGroup = async (groupId: string) => {
+    if (groupId === "no-group") return;
+
+    try {
+      setError(null);
+      await checkoutCustomerGroup(groupId);
       await loadOrderData();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -1659,9 +1716,30 @@ const notificationBadge = (count: number) =>
                       backgroundColor: "#f9fafb",
                     }}
                   >
-                    <h4 style={{ margin: "0 0 8px", fontSize: 15 }}>
-                      {group.label}
-                    </h4>
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 8,
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        marginBottom: 8,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <h4 style={{ margin: 0, fontSize: 15 }}>
+                        {group.label}
+                      </h4>
+                      {!group.closedAt &&
+                        group.id !== "no-group" &&
+                        !pendingOrders.some((order) => order.customer_group_id === group.id) && (
+                        <button
+                          onClick={() => checkoutGroup(group.id)}
+                          disabled={loading}
+                        >
+                          会計済みにする
+                        </button>
+                      )}
+                    </div>
                     <ul style={{ margin: 0, paddingLeft: 20 }}>
                       {group.orders.map((order) => (
                         <li key={order.id} style={{ marginBottom: 8 }}>

@@ -22,6 +22,11 @@ const supabase = createClient(
 const adminPassword = process.env.ADMIN_PASSWORD;
 const adminToken =
   process.env.ADMIN_AUTH_TOKEN || crypto.randomBytes(32).toString("hex");
+const customerGroupLabels = process.env.CUSTOMER_GROUP_LABELS
+  ? process.env.CUSTOMER_GROUP_LABELS.split(",")
+      .map((label) => label.trim())
+      .filter(Boolean)
+  : ["テーブル1", "テーブル2", "テーブル3", "テーブル4", "テーブル5", "テーブル6"];
 
 const requireAdmin: express.RequestHandler = (req, res, next) => {
   const authHeader = req.header("Authorization");
@@ -378,7 +383,7 @@ app.get("/orders", requireAdmin, async (_req, res) => {
   try {
     const { data, error } = await supabase
       .from("orders")
-      .select("id,menu_item_id,customer_group_id,quantity,status,created_at,completed_at,cancelled_at,cancel_confirmed_at,staff_called_at,staff_call_confirmed_at,menu_items(name),customer_groups(label)")
+      .select("id,menu_item_id,customer_group_id,quantity,status,created_at,completed_at,cancelled_at,cancel_confirmed_at,staff_called_at,staff_call_confirmed_at,menu_items(name),customer_groups(label,closed_at)")
       .order("created_at", { ascending: false });
 
     if (error) return res.status(500).json({ error: error.message });
@@ -450,10 +455,52 @@ app.patch("/staff-calls/:id/confirm", requireAdmin, async (req, res) => {
   }
 });
 
+app.get("/customer-groups", async (_req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("customer_groups")
+      .select("id,label,created_at,closed_at")
+      .in("label", customerGroupLabels)
+      .is("closed_at", null)
+      .order("created_at", { ascending: false });
+
+    if (error) return res.status(500).json({ error: error.message });
+
+    const activeByLabel = new Map(
+      (data ?? []).map((group) => [group.label, group])
+    );
+
+    res.json(
+      customerGroupLabels.map((label) => ({
+        label,
+        active_group: activeByLabel.get(label) ?? null,
+      }))
+    );
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
 app.post("/customer-groups", async (req, res) => {
   try {
     const rawLabel = typeof req.body?.label === "string" ? req.body.label.trim() : "";
-    const label = rawLabel || "お客様";
+    const label = rawLabel || customerGroupLabels[0];
+
+    if (!customerGroupLabels.includes(label)) {
+      return res.status(400).json({ error: "登録されていない卓です" });
+    }
+
+    const { data: activeGroup, error: activeGroupError } = await supabase
+      .from("customer_groups")
+      .select("id,label,created_at,closed_at")
+      .eq("label", label)
+      .is("closed_at", null)
+      .maybeSingle();
+
+    if (activeGroupError) return res.status(500).json({ error: activeGroupError.message });
+    if (activeGroup) {
+      return res.status(409).json({ error: "この卓はすでに注文中です" });
+    }
 
     const { data, error } = await supabase
       .from("customer_groups")
@@ -463,6 +510,22 @@ app.post("/customer-groups", async (req, res) => {
 
     if (error) return res.status(500).json({ error: error.message });
     res.status(201).json(data);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.patch("/customer-groups/:id/checkout", requireAdmin, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("customer_groups")
+      .update({ closed_at: new Date().toISOString() })
+      .eq("id", req.params.id)
+      .select("id,label,created_at,closed_at")
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
   } catch (e) {
     res.status(500).json({ error: String(e) });
   }
@@ -517,7 +580,7 @@ app.get("/orders/:id/status", async (req, res) => {
   try {
     const { data, error } = await supabase
       .from("orders")
-      .select("id,menu_item_id,customer_group_id,quantity,status,created_at,completed_at,cancelled_at,cancel_confirmed_at,staff_called_at,staff_call_confirmed_at,menu_items(name),customer_groups(label)")
+      .select("id,menu_item_id,customer_group_id,quantity,status,created_at,completed_at,cancelled_at,cancel_confirmed_at,staff_called_at,staff_call_confirmed_at,menu_items(name),customer_groups(label,closed_at)")
       .eq("id", req.params.id)
       .single();
 
