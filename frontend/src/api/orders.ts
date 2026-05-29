@@ -26,9 +26,11 @@ export type Order = {
   id: string;
   menu_item_id: string;
   quantity: number;
-  status: "調理中" | "完了";
+  status: "調理中" | "完了" | "キャンセル";
   created_at: string;
   completed_at: string | null;
+  cancelled_at: string | null;
+  cancel_confirmed_at: string | null;
   menu_items?: { name: string } | { name: string }[] | null;
 };
 
@@ -117,6 +119,19 @@ export async function createOrder(params: {
 
 export async function completeOrder(id: string): Promise<Order> {
   return request<Order>(`/orders/${id}/complete`, {
+    method: "PATCH",
+    headers: adminHeaders(),
+  });
+}
+
+export async function cancelOrder(id: string): Promise<Order> {
+  return request<Order>(`/orders/${id}/cancel`, {
+    method: "PATCH",
+  });
+}
+
+export async function confirmOrderCancellation(id: string): Promise<Order> {
+  return request<Order>(`/orders/${id}/confirm-cancel`, {
     method: "PATCH",
     headers: adminHeaders(),
   });

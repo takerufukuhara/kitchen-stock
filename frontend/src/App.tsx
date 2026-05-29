@@ -3,7 +3,9 @@ import { fetchItems, type Item, createItem,deleteItem,updateItem } from "./api/i
 import { createStockMovement, fetchStockMovements, deleteStockMovement, fetchWasteSummary, type StockMovement, type WasteSummary } from "./api/stockMovements";
 import {
   addRecipe,
+  cancelOrder,
   completeOrder,
+  confirmOrderCancellation,
   createMenuItem,
   createOrder,
   deleteMenuItem,
@@ -152,8 +154,15 @@ function CustomerOrderPage() {
   const [quantityByMenuId, setQuantityByMenuId] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [submittingMenuId, setSubmittingMenuId] = useState<string | null>(null);
+  const [cancelingOrderId, setCancelingOrderId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [lastOrder, setLastOrder] = useState<{
+    id: string;
+    menuName: string;
+    createdAt: string;
+  } | null>(null);
+  const [now, setNow] = useState(() => Date.now());
 
   const inputStyle: React.CSSProperties = {
     minHeight: 38,
@@ -199,6 +208,11 @@ function CustomerOrderPage() {
     loadMenus();
   }, []);
 
+  useEffect(() => {
+    const intervalId = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(intervalId);
+  }, []);
+
   const submitOrder = async (menu: MenuItem) => {
     const quantity = Number(quantityByMenuId[menu.id] ?? "1");
     if (!Number.isFinite(quantity) || quantity <= 0) {
@@ -210,13 +224,35 @@ function CustomerOrderPage() {
       setSubmittingMenuId(menu.id);
       setError(null);
       setMessage(null);
-      await createOrder({ menu_item_id: menu.id, quantity });
+      setLastOrder(null);
+      const order = await createOrder({ menu_item_id: menu.id, quantity });
       setMessage(`「${menu.name}」の注文を受け付けました`);
+      setLastOrder({ id: order.id, menuName: menu.name, createdAt: order.created_at });
       setQuantityByMenuId((prev) => ({ ...prev, [menu.id]: "1" }));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSubmittingMenuId(null);
+    }
+  };
+
+  const canCancelLastOrder = lastOrder
+    ? now - new Date(lastOrder.createdAt).getTime() <= 3 * 60 * 1000
+    : false;
+
+  const cancelLastOrder = async () => {
+    if (!lastOrder) return;
+
+    try {
+      setCancelingOrderId(lastOrder.id);
+      setError(null);
+      await cancelOrder(lastOrder.id);
+      setMessage(`「${lastOrder.menuName}」の注文をキャンセルしました`);
+      setLastOrder(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCancelingOrderId(null);
     }
   };
 
@@ -253,7 +289,7 @@ function CustomerOrderPage() {
           </p>
         )}
         {message && (
-          <p
+          <div
             style={{
               color: "#166534",
               background: "#dcfce7",
@@ -262,8 +298,33 @@ function CustomerOrderPage() {
               padding: 12,
             }}
           >
-            {message}
-          </p>
+            <p style={{ margin: 0 }}>{message}</p>
+            {lastOrder && canCancelLastOrder && (
+              <button
+                onClick={cancelLastOrder}
+                disabled={cancelingOrderId === lastOrder.id}
+                style={{
+                  marginTop: 10,
+                  color: "#991b1b",
+                  backgroundColor: "#fff",
+                  border: "1px solid #fca5a5",
+                  borderRadius: 6,
+                  fontWeight: 700,
+                  padding: "8px 10px",
+                  cursor: "pointer",
+                }}
+              >
+                {cancelingOrderId === lastOrder.id
+                  ? "キャンセル中..."
+                  : "注文をキャンセル"}
+              </button>
+            )}
+            {lastOrder && !canCancelLastOrder && (
+              <p style={{ margin: "10px 0 0", color: "#92400e" }}>
+                注文から時間が経過したため、画面からはキャンセルできません。スタッフにお声がけください。
+              </p>
+            )}
+          </div>
         )}
 
         {!loading && menuItems.length === 0 ? (
@@ -345,6 +406,8 @@ function AdminApp({ onLogout }: { onLogout: () => void }) {
   const [recipeQuantity, setRecipeQuantity] = useState("1");
   const [orderMenuId, setOrderMenuId] = useState("");
   const [orderQuantity, setOrderQuantity] = useState("1");
+  const [expandedRecipeMenuId, setExpandedRecipeMenuId] = useState<string | null>(null);
+  const [orderTab, setOrderTab] = useState<"received" | "canceled" | "manual" | "recipes">("received");
 
   const [editingId, setEditingId] = useState<string | null>(null);
 const [editName, setEditName] = useState("");
@@ -629,7 +692,10 @@ const cancelEdit = () => {
     }
   };
 
-  const pendingOrders = orders.filter((order) => order.status !== "完了");
+  const pendingOrders = orders.filter((order) => order.status === "調理中");
+  const canceledOrders = orders.filter(
+    (order) => order.status === "キャンセル" && !order.cancel_confirmed_at
+  );
 
   const addMenu = async () => {
     const name = newMenuName.trim();
@@ -681,6 +747,7 @@ const cancelEdit = () => {
       await deleteMenuItem(menu.id);
       if (recipeMenuId === menu.id) setRecipeMenuId("");
       if (orderMenuId === menu.id) setOrderMenuId("");
+      if (expandedRecipeMenuId === menu.id) setExpandedRecipeMenuId(null);
       await loadOrderData();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -709,6 +776,16 @@ const cancelEdit = () => {
       setError(null);
       await completeOrder(orderId);
       await loadItems();
+      await loadOrderData();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const confirmCancellation = async (orderId: string) => {
+    try {
+      setError(null);
+      await confirmOrderCancellation(orderId);
       await loadOrderData();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -891,9 +968,6 @@ const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
           style={{
             ...sectionStyle,
             marginTop: 0,
-            border:
-              lowStockItems.length > 0 ? "1px solid #fca5a5" : "1px solid #ddd",
-            background: lowStockItems.length > 0 ? "#fef2f2" : "#fff",
           }}
         >
           <h2 style={{ margin: "0 0 8px" }}>発注管理</h2>
@@ -903,7 +977,10 @@ const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
             <p style={{ margin: 0 }}>基準在庫を下回っている商品はありません</p>
           ) : (
             <p style={{ margin: "0 0 12px" }}>
-              {lowStockItems.length}件の商品が基準在庫を下回っています。
+              <strong style={{ color: "#dc2626" }}>
+                {lowStockItems.length}件
+              </strong>
+              の商品が基準在庫を下回っています。
             </p>
           )}
 
@@ -938,7 +1015,10 @@ const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
                   <ul style={{ margin: 0, paddingLeft: 20 }}>
                     {group.items.map((item) => (
                       <li key={item.id} style={{ marginBottom: 6 }}>
-                        {item.name}: {item.shortage}
+                        {item.name}:{" "}
+                        <strong style={{ color: "#dc2626" }}>
+                          {item.shortage}
+                        </strong>
                         {item.unit} 発注
                       </li>
                     ))}
@@ -964,12 +1044,48 @@ const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
 
         <div
           style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 8,
+            marginBottom: 16,
+          }}
+        >
+          <button
+            onClick={() => setOrderTab("received")}
+            style={tabButtonStyle(orderTab === "received")}
+          >
+            受注一覧
+          </button>
+          <button
+            onClick={() => setOrderTab("canceled")}
+            style={tabButtonStyle(orderTab === "canceled")}
+          >
+            キャンセル通知
+            {canceledOrders.length > 0 && ` (${canceledOrders.length})`}
+          </button>
+          <button
+            onClick={() => setOrderTab("manual")}
+            style={tabButtonStyle(orderTab === "manual")}
+          >
+            手動注文
+          </button>
+          <button
+            onClick={() => setOrderTab("recipes")}
+            style={tabButtonStyle(orderTab === "recipes")}
+          >
+            メニュー・レシピ
+          </button>
+        </div>
+
+        <div
+          style={{
             display: "grid",
             gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
             gap: 16,
             alignItems: "start",
           }}
         >
+          {orderTab === "recipes" && (
           <div>
             <h3 style={{ margin: "0 0 8px", fontSize: 16 }}>メニュー登録</h3>
             <div style={{ display: "flex", gap: 8 }}>
@@ -1036,7 +1152,9 @@ const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
               </button>
             </div>
           </div>
+          )}
 
+          {orderTab === "manual" && (
           <div>
             <h3 style={{ margin: "0 0 8px", fontSize: 16 }}>注文追加</h3>
             <div style={{ display: "grid", gap: 8 }}>
@@ -1064,7 +1182,11 @@ const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
                 注文を追加
               </button>
             </div>
+          </div>
+          )}
 
+          {orderTab === "received" && (
+          <div>
             <h3 style={{ margin: "16px 0 8px", fontSize: 16 }}>注文中</h3>
             {pendingOrders.length === 0 ? (
               <p style={{ margin: 0 }}>注文中の商品はありません</p>
@@ -1085,9 +1207,41 @@ const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
               </ul>
             )}
           </div>
+          )}
+
+          {orderTab === "canceled" && (
+          <div>
+            <h3 style={{ margin: "16px 0 8px", fontSize: 16 }}>キャンセル通知</h3>
+            {canceledOrders.length === 0 ? (
+              <p style={{ margin: 0 }}>未確認のキャンセルはありません</p>
+            ) : (
+              <ul style={{ margin: 0, paddingLeft: 20 }}>
+                {canceledOrders.map((order) => (
+                  <li key={order.id} style={{ marginBottom: 10 }}>
+                    <div>
+                      <strong>{getJoinedName(order.menu_items)}</strong> × {order.quantity}
+                    </div>
+                    <div style={{ fontSize: 14, color: "#4b5563" }}>
+                      注文: {new Date(order.created_at).toLocaleString()}
+                      {order.cancelled_at &&
+                        ` / キャンセル: ${new Date(order.cancelled_at).toLocaleString()}`}
+                    </div>
+                    <button
+                      onClick={() => confirmCancellation(order.id)}
+                      disabled={loading}
+                      style={{ marginTop: 6 }}
+                    >
+                      確認済みにする
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          )}
         </div>
 
-        {menuItems.length > 0 && (
+        {orderTab === "recipes" && menuItems.length > 0 && (
           <div style={{ marginTop: 16 }}>
             <h3 style={{ margin: "0 0 8px", fontSize: 16 }}>登録済みレシピ</h3>
             <div
@@ -1097,60 +1251,83 @@ const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
                 gap: 12,
               }}
             >
-              {menuItems.map((menu) => (
-                <div
-                  key={menu.id}
-                  style={{
-                    padding: 12,
-                    borderRadius: 8,
-                    border: "1px solid #ddd",
-                  }}
-                >
+              {menuItems.map((menu) => {
+                const expanded = expandedRecipeMenuId === menu.id;
+
+                return (
                   <div
+                    key={menu.id}
                     style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      gap: 8,
-                      alignItems: "center",
+                      padding: 12,
+                      borderRadius: 8,
+                      border: "1px solid #ddd",
                     }}
                   >
-                    <strong>{menu.name}</strong>
-                    <button
-                      onClick={() => removeMenu(menu)}
-                      disabled={loading}
-                      style={buttonStyle}
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        gap: 8,
+                        alignItems: "center",
+                      }}
                     >
-                      メニュー削除
-                    </button>
-                  </div>
-                  {menu.recipes.length === 0 ? (
-                    <p style={{ margin: "8px 0 0" }}>レシピ未登録</p>
-                  ) : (
-                    <ul style={{ margin: "8px 0 0", paddingLeft: 20 }}>
-                      {menu.recipes.map((recipe) => (
-                        <li key={recipe.id} style={{ marginBottom: 6 }}>
-                          {getJoinedName(recipe.items)}: {recipe.quantity}
-                          <button
-                            onClick={async () => {
-                              try {
-                                setError(null);
-                                await deleteRecipe(recipe.id);
-                                await loadOrderData();
-                              } catch (e) {
-                                setError(e instanceof Error ? e.message : String(e));
-                              }
-                            }}
-                            disabled={loading}
-                            style={{ marginLeft: 8 }}
-                          >
-                            削除
-                          </button>
-                        </li>
+                      <button
+                        onClick={() =>
+                          setExpandedRecipeMenuId(expanded ? null : menu.id)
+                        }
+                        style={{
+                          ...buttonStyle,
+                          flex: 1,
+                          textAlign: "left",
+                          padding: "8px 10px",
+                          background: expanded ? "#eff6ff" : "#fff",
+                          borderColor: expanded ? "#2563eb" : "#9ca3af",
+                        }}
+                      >
+                        {expanded ? "▼" : "▶"} {menu.name}
+                        <span style={{ marginLeft: 8, fontSize: 13, color: "#4b5563" }}>
+                          {menu.recipes.length}品
+                        </span>
+                      </button>
+                      <button
+                        onClick={() => removeMenu(menu)}
+                        disabled={loading}
+                        style={buttonStyle}
+                      >
+                        メニュー削除
+                      </button>
+                    </div>
+
+                    {expanded &&
+                      (menu.recipes.length === 0 ? (
+                        <p style={{ margin: "8px 0 0" }}>レシピ未登録</p>
+                      ) : (
+                        <ul style={{ margin: "8px 0 0", paddingLeft: 20 }}>
+                          {menu.recipes.map((recipe) => (
+                            <li key={recipe.id} style={{ marginBottom: 6 }}>
+                              {getJoinedName(recipe.items)}: {recipe.quantity}
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    setError(null);
+                                    await deleteRecipe(recipe.id);
+                                    await loadOrderData();
+                                  } catch (e) {
+                                    setError(e instanceof Error ? e.message : String(e));
+                                  }
+                                }}
+                                disabled={loading}
+                                style={{ marginLeft: 8 }}
+                              >
+                                削除
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
                       ))}
-                    </ul>
-                  )}
-                </div>
-              ))}
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}

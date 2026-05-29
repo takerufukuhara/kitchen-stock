@@ -378,7 +378,7 @@ app.get("/orders", requireAdmin, async (_req, res) => {
   try {
     const { data, error } = await supabase
       .from("orders")
-      .select("id,menu_item_id,quantity,status,created_at,completed_at,menu_items(name)")
+      .select("id,menu_item_id,quantity,status,created_at,completed_at,cancelled_at,cancel_confirmed_at,menu_items(name)")
       .order("created_at", { ascending: false });
 
     if (error) return res.status(500).json({ error: error.message });
@@ -416,6 +416,76 @@ app.post("/orders", async (req, res) => {
   }
 });
 
+app.patch("/orders/:id/cancel", async (req, res) => {
+  try {
+    const orderId = req.params.id;
+
+    const { data: order, error: orderError } = await supabase
+      .from("orders")
+      .select("id,status,created_at")
+      .eq("id", orderId)
+      .single();
+
+    if (orderError) return res.status(500).json({ error: orderError.message });
+    if (!order) return res.status(404).json({ error: "注文が見つかりません" });
+    if (order.status === "完了") {
+      return res.status(400).json({ error: "完了済みの注文はキャンセルできません" });
+    }
+    if (order.status === "キャンセル") {
+      return res.status(400).json({ error: "この注文はすでにキャンセルされています" });
+    }
+    const createdAtMs = new Date(order.created_at).getTime();
+    const cancelLimitMs = 3 * 60 * 1000;
+    if (Date.now() - createdAtMs > cancelLimitMs) {
+      return res.status(400).json({
+        error: "注文から時間が経過しているため、画面からはキャンセルできません。スタッフにお声がけください。",
+      });
+    }
+
+    const { data, error } = await supabase
+      .from("orders")
+      .update({ status: "キャンセル", cancelled_at: new Date().toISOString() })
+      .eq("id", orderId)
+      .select()
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.patch("/orders/:id/confirm-cancel", requireAdmin, async (req, res) => {
+  try {
+    const orderId = req.params.id;
+
+    const { data: order, error: orderError } = await supabase
+      .from("orders")
+      .select("id,status")
+      .eq("id", orderId)
+      .single();
+
+    if (orderError) return res.status(500).json({ error: orderError.message });
+    if (!order) return res.status(404).json({ error: "注文が見つかりません" });
+    if (order.status !== "キャンセル") {
+      return res.status(400).json({ error: "キャンセルされた注文だけ確認済みにできます" });
+    }
+
+    const { data, error } = await supabase
+      .from("orders")
+      .update({ cancel_confirmed_at: new Date().toISOString() })
+      .eq("id", orderId)
+      .select()
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
 app.patch("/orders/:id/complete", requireAdmin, async (req, res) => {
   try {
     const orderId = req.params.id;
@@ -428,8 +498,8 @@ app.patch("/orders/:id/complete", requireAdmin, async (req, res) => {
 
     if (orderError) return res.status(500).json({ error: orderError.message });
     if (!order) return res.status(404).json({ error: "注文が見つかりません" });
-    if (order.status === "完了") {
-      return res.status(400).json({ error: "この注文はすでに完了しています" });
+    if (order.status !== "調理中") {
+      return res.status(400).json({ error: "調理中の注文だけ完了できます" });
     }
 
     const { data: recipes, error: recipesError } = await supabase
