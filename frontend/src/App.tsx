@@ -182,6 +182,9 @@ function CustomerOrderPage() {
   const [creatingGroup, setCreatingGroup] = useState(false);
   const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
   const [customerOrderHistory, setCustomerOrderHistory] = useState<Order[]>([]);
+  const [customerOrdersOpen, setCustomerOrdersOpen] = useState(false);
+  const [customerHistoryOpen, setCustomerHistoryOpen] = useState(false);
+  const [orderListOpen, setOrderListOpen] = useState(false);
   const [orderList, setOrderList] = useState<
     { menu_item_id: string; name: string; quantity: number }[]
   >([]);
@@ -305,6 +308,9 @@ function CustomerOrderPage() {
     setCustomerGroup(null);
     setCustomerOrders([]);
     setCustomerOrderHistory([]);
+    setCustomerOrdersOpen(false);
+    setCustomerHistoryOpen(false);
+    setOrderListOpen(false);
     setOrderList([]);
     setCheckoutRequested(false);
   };
@@ -646,8 +652,33 @@ function CustomerOrderPage() {
               background: "#f9fafb",
             }}
           >
-            <h2 style={{ margin: "0 0 8px", fontSize: 18 }}>注文中リスト</h2>
-            <ul style={{ margin: 0, paddingLeft: 20 }}>
+            <button
+              type="button"
+              onClick={() => setCustomerOrdersOpen((open) => !open)}
+              style={{
+                width: "100%",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: 8,
+                margin: 0,
+                padding: 0,
+                color: "#111827",
+                background: "transparent",
+                border: 0,
+                fontSize: 18,
+                fontWeight: 700,
+                cursor: "pointer",
+                textAlign: "left",
+              }}
+            >
+              <span>注文中リスト（{customerOrders.length}件）</span>
+              <span style={{ fontSize: 14 }}>
+                {customerOrdersOpen ? "閉じる" : "見る"}
+              </span>
+            </button>
+            {customerOrdersOpen && (
+            <ul style={{ margin: "8px 0 0", paddingLeft: 20 }}>
               {customerOrders.map((order) => {
                 const canCancel =
                   order.status === "調理待ち";
@@ -695,6 +726,7 @@ function CustomerOrderPage() {
                 );
               })}
             </ul>
+            )}
           </section>
         )}
 
@@ -708,8 +740,33 @@ function CustomerOrderPage() {
               background: "#fff",
             }}
           >
-            <h2 style={{ margin: "0 0 8px", fontSize: 18 }}>注文履歴</h2>
-            <ul style={{ margin: 0, paddingLeft: 20 }}>
+            <button
+              type="button"
+              onClick={() => setCustomerHistoryOpen((open) => !open)}
+              style={{
+                width: "100%",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: 8,
+                margin: 0,
+                padding: 0,
+                color: "#111827",
+                background: "transparent",
+                border: 0,
+                fontSize: 18,
+                fontWeight: 700,
+                cursor: "pointer",
+                textAlign: "left",
+              }}
+            >
+              <span>注文履歴（{customerOrderHistory.length}件）</span>
+              <span style={{ fontSize: 14 }}>
+                {customerHistoryOpen ? "閉じる" : "見る"}
+              </span>
+            </button>
+            {customerHistoryOpen && (
+            <ul style={{ margin: "8px 0 0", paddingLeft: 20 }}>
               {customerOrderHistory.map((order) => (
                 <li key={order.id} style={{ marginBottom: 8 }}>
                   <div>
@@ -725,6 +782,7 @@ function CustomerOrderPage() {
                 </li>
               ))}
             </ul>
+            )}
           </section>
         )}
 
@@ -738,14 +796,38 @@ function CustomerOrderPage() {
               background: "#f9fafb",
             }}
           >
-            <h2 style={{ margin: "0 0 8px", fontSize: 18 }}>注文予定リスト</h2>
-            {orderList.length === 0 ? (
+            <button
+              type="button"
+              onClick={() => setOrderListOpen((open) => !open)}
+              style={{
+                width: "100%",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: 8,
+                margin: 0,
+                padding: 0,
+                color: "#111827",
+                background: "transparent",
+                border: 0,
+                fontSize: 18,
+                fontWeight: 700,
+                cursor: "pointer",
+                textAlign: "left",
+              }}
+            >
+              <span>注文予定リスト（{orderList.length}件）</span>
+              <span style={{ fontSize: 14 }}>
+                {orderListOpen ? "閉じる" : "見る"}
+              </span>
+            </button>
+            {orderListOpen && orderList.length === 0 ? (
               <p style={{ margin: 0, color: "#4b5563" }}>
                 メニューを選んでリストに追加してください。
               </p>
-            ) : (
+            ) : orderListOpen && (
               <>
-                <ul style={{ margin: "0 0 12px", paddingLeft: 20 }}>
+                <ul style={{ margin: "8px 0 12px", paddingLeft: 20 }}>
                   {orderList.map((item) => (
                     <li key={item.menu_item_id} style={{ marginBottom: 8 }}>
                       <div>
@@ -866,6 +948,7 @@ function AdminApp({ onLogout }: { onLogout: () => void }) {
   const [staffCalls, setStaffCalls] = useState<StaffCall[]>([]);
 
   const [newMenuName, setNewMenuName] = useState("");
+  const [newMenuCategory, setNewMenuCategory] = useState("");
   const [recipeMenuId, setRecipeMenuId] = useState("");
   const [recipeItemId, setRecipeItemId] = useState("");
   const [recipeQuantity, setRecipeQuantity] = useState("1");
@@ -1078,6 +1161,31 @@ const cancelEdit = () => {
   ).sort((a, b) => a.localeCompare(b, "ja"));
 
   const categoryOptions = categories.filter((category) => category !== "未分類");
+  const getMenuCategoryLabel = (menu: MenuItem) =>
+    menu.category?.trim() || "未分類";
+  const menuCategoryOptions = Array.from(
+    new Set(menuItems.map((menu) => getMenuCategoryLabel(menu)).filter((category) => category !== "未分類"))
+  ).sort((a, b) => a.localeCompare(b, "ja"));
+  const menuCategoryGroups = Array.from(
+    menuItems
+      .reduce((map, menu) => {
+        const category = getMenuCategoryLabel(menu);
+        const current = map.get(category) ?? {
+          category,
+          menus: [] as MenuItem[],
+        };
+        current.menus.push(menu);
+        map.set(category, current);
+        return map;
+      }, new Map<string, { category: string; menus: MenuItem[] }>())
+      .values()
+  ).sort((a, b) => {
+    if (a.category === "その他") return 1;
+    if (b.category === "その他") return -1;
+    if (a.category === "未分類") return 1;
+    if (b.category === "未分類") return -1;
+    return a.category.localeCompare(b.category, "ja");
+  });
 
   const categorySummaries = categories
     .map((category) => {
@@ -1327,8 +1435,12 @@ const cancelEdit = () => {
 
     try {
       setError(null);
-      const created = await createMenuItem(name);
+      const created = await createMenuItem({
+        name,
+        category: newMenuCategory.trim() || null,
+      });
       setNewMenuName("");
+      setNewMenuCategory("");
       setRecipeMenuId(created.id);
       setOrderMenuId(created.id);
       await loadOrderData();
@@ -1786,13 +1898,25 @@ const notificationBadge = (count: number) =>
           {orderTab === "recipes" && (
           <div>
             <h3 style={{ margin: "0 0 8px", fontSize: 16 }}>メニュー登録</h3>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ display: "grid", gap: 8 }}>
               <input
                 placeholder="メニュー名（例：唐揚げ定食）"
                 value={newMenuName}
                 onChange={(e) => setNewMenuName(e.target.value)}
-                style={{ ...inputStyle, flex: 1 }}
+                style={inputStyle}
               />
+              <input
+                placeholder="カテゴリ（例：定食・麺・ドリンク）"
+                value={newMenuCategory}
+                onChange={(e) => setNewMenuCategory(e.target.value)}
+                list="menu-category-options"
+                style={inputStyle}
+              />
+              <datalist id="menu-category-options">
+                {menuCategoryOptions.map((category) => (
+                  <option key={category} value={category} />
+                ))}
+              </datalist>
               <button onClick={addMenu} disabled={loading}>
                 追加
               </button>
@@ -2108,19 +2232,37 @@ const notificationBadge = (count: number) =>
                 gap: 12,
               }}
             >
-              {menuItems.map((menu) => {
-                const expanded = expandedRecipeMenuId === menu.id;
-                const availability = getMenuAvailability(menu);
+              {menuCategoryGroups.map((group) => (
+                <section
+                  key={group.category}
+                  style={{
+                    border: "1px solid #ddd",
+                    borderRadius: 8,
+                    padding: 12,
+                  }}
+                >
+                  <h4 style={{ margin: "0 0 4px", fontSize: 15 }}>
+                    {group.category}
+                  </h4>
+                  <p style={{ margin: "0 0 10px", color: "#4b5563", fontSize: 13 }}>
+                    {group.menus.length}件 / レシピ未登録{" "}
+                    {group.menus.filter((menu) => menu.recipes.length === 0).length}件
+                  </p>
+                  <div style={{ display: "grid", gap: 10 }}>
+                    {group.menus.map((menu) => {
+                      const expanded = expandedRecipeMenuId === menu.id;
+                      const availability = getMenuAvailability(menu);
 
-                return (
-                  <div
-                    key={menu.id}
-                    style={{
-                      padding: 12,
-                      borderRadius: 8,
-                      border: "1px solid #ddd",
-                    }}
-                  >
+                      return (
+                        <div
+                          key={menu.id}
+                          style={{
+                            padding: 10,
+                            borderRadius: 8,
+                            border: "1px solid #e5e7eb",
+                            background: "#fff",
+                          }}
+                        >
                     <div
                       style={{
                         display: "flex",
@@ -2229,9 +2371,12 @@ const notificationBadge = (count: number) =>
                         </ul>
                         </>
                       ))}
+                        </div>
+                      );
+                    })}
                   </div>
-                );
-              })}
+                </section>
+              ))}
             </div>
           </div>
         )}

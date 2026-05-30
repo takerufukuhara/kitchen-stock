@@ -18,6 +18,7 @@ export type Recipe = {
 export type MenuItem = {
   id: string;
   name: string;
+  category: string | null;
   created_at?: string;
   recipes: Recipe[];
 };
@@ -43,8 +44,10 @@ export type Order = {
 
 export type StaffCall = {
   id: string;
+  customer_group_id: string | null;
   created_at: string;
   confirmed_at: string | null;
+  customer_groups?: { label: string | null } | { label: string | null }[] | null;
 };
 
 export type CustomerGroup = {
@@ -88,11 +91,14 @@ export async function fetchPublicMenuItems(): Promise<MenuItem[]> {
   return request<MenuItem[]>("/public/menu-items");
 }
 
-export async function createMenuItem(name: string): Promise<MenuItem> {
+export async function createMenuItem(params: {
+  name: string;
+  category?: string | null;
+}): Promise<MenuItem> {
   return request<MenuItem>("/menu-items", {
     method: "POST",
     headers: adminHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ name }),
+    body: JSON.stringify(params),
   });
 }
 
@@ -210,9 +216,11 @@ export async function confirmStaffCall(id: string): Promise<Order> {
   });
 }
 
-export async function createStaffCall(): Promise<StaffCall> {
+export async function createStaffCall(customer_group_id: string): Promise<StaffCall> {
   return request<StaffCall>("/staff-calls", {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ customer_group_id }),
   });
 }
 

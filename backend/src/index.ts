@@ -257,7 +257,7 @@ app.get("/public/menu-items", async (_req, res) => {
   try {
     const { data, error } = await supabase
       .from("menu_items")
-      .select("id,name")
+      .select("id,name,category")
       .order("name", { ascending: true });
 
     if (error) return res.status(500).json({ error: error.message });
@@ -297,7 +297,9 @@ app.get("/menu-items", requireAdmin, async (_req, res) => {
 
 app.post("/menu-items", requireAdmin, async (req, res) => {
   try {
-    const { name } = req.body ?? {};
+    const { name, category } = req.body ?? {};
+    const trimmedCategory =
+      category === undefined || category === null ? "" : String(category).trim();
 
     if (!name || !String(name).trim()) {
       return res.status(400).json({ error: "メニュー名は必須です" });
@@ -305,7 +307,7 @@ app.post("/menu-items", requireAdmin, async (req, res) => {
 
     const { data, error } = await supabase
       .from("menu_items")
-      .insert([{ name: String(name).trim() }])
+      .insert([{ name: String(name).trim(), category: trimmedCategory || null }])
       .select()
       .single();
 
@@ -397,7 +399,7 @@ app.get("/staff-calls", requireAdmin, async (_req, res) => {
   try {
     const { data, error } = await supabase
       .from("staff_calls")
-      .select("id,created_at,confirmed_at")
+      .select("id,customer_group_id,created_at,confirmed_at,customer_groups(label)")
       .is("confirmed_at", null)
       .order("created_at", { ascending: false });
 
@@ -412,7 +414,7 @@ app.get("/staff-calls/:id", async (req, res) => {
   try {
     const { data, error } = await supabase
       .from("staff_calls")
-      .select("id,created_at,confirmed_at")
+      .select("id,customer_group_id,created_at,confirmed_at,customer_groups(label)")
       .eq("id", req.params.id)
       .single();
 
@@ -424,11 +426,17 @@ app.get("/staff-calls/:id", async (req, res) => {
   }
 });
 
-app.post("/staff-calls", async (_req, res) => {
+app.post("/staff-calls", async (req, res) => {
   try {
+    const { customer_group_id } = req.body ?? {};
+
+    if (!customer_group_id) {
+      return res.status(400).json({ error: "customer_group_id は必須です" });
+    }
+
     const { data, error } = await supabase
       .from("staff_calls")
-      .insert([{}])
+      .insert([{ customer_group_id }])
       .select()
       .single();
 
