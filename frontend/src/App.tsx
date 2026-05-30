@@ -40,6 +40,7 @@ import {
 
 const CUSTOMER_ORDER_IDS_KEY = "kitchen-stock-customer-order-ids";
 const CUSTOMER_GROUP_ID_KEY = "kitchen-stock-customer-group-id";
+const CUSTOMER_CHECKOUT_REQUESTED_KEY = "kitchen-stock-checkout-requested";
 
 export default function App() {
   const path = window.location.pathname.replace(/\/+$/, "") || "/";
@@ -170,7 +171,7 @@ function CustomerOrderPage() {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [quantityByMenuId, setQuantityByMenuId] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
-  const [submittingMenuId, setSubmittingMenuId] = useState<string | null>(null);
+  const [submittingOrderList, setSubmittingOrderList] = useState(false);
   const [cancelingOrderId, setCancelingOrderId] = useState<string | null>(null);
   const [callingStaff, setCallingStaff] = useState(false);
   const [staffCalled, setStaffCalled] = useState(false);
@@ -180,6 +181,13 @@ function CustomerOrderPage() {
   const [selectedGroupLabel, setSelectedGroupLabel] = useState("");
   const [creatingGroup, setCreatingGroup] = useState(false);
   const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
+  const [customerOrderHistory, setCustomerOrderHistory] = useState<Order[]>([]);
+  const [orderList, setOrderList] = useState<
+    { menu_item_id: string; name: string; quantity: number }[]
+  >([]);
+  const [checkoutRequested, setCheckoutRequested] = useState(
+    () => window.localStorage.getItem(CUSTOMER_CHECKOUT_REQUESTED_KEY) === "true"
+  );
   const [error, setError] = useState<string | null>(null);
 
   const inputStyle: React.CSSProperties = {
@@ -256,7 +264,7 @@ function CustomerOrderPage() {
 
         const group = await fetchCustomerGroup(groupId);
         if (group.closed_at) {
-          resetCustomerGroup();
+          resetCustomerSession();
           return;
         }
 
@@ -277,7 +285,10 @@ function CustomerOrderPage() {
       const label = selectedGroupLabel || customerGroupOptions[0]?.label || "";
       const group = await createCustomerGroup(label);
       window.localStorage.setItem(CUSTOMER_GROUP_ID_KEY, group.id);
+      window.localStorage.removeItem(CUSTOMER_CHECKOUT_REQUESTED_KEY);
       setCustomerGroup(group);
+      setCheckoutRequested(false);
+      setOrderList([]);
       setSelectedGroupLabel(group.label ?? "");
       await refreshCustomerGroupOptions();
     } catch (e) {
@@ -287,33 +298,48 @@ function CustomerOrderPage() {
     }
   };
 
-  const resetCustomerGroup = () => {
+  const resetCustomerSession = () => {
     window.localStorage.removeItem(CUSTOMER_GROUP_ID_KEY);
     window.localStorage.removeItem(CUSTOMER_ORDER_IDS_KEY);
+    window.localStorage.removeItem(CUSTOMER_CHECKOUT_REQUESTED_KEY);
     setCustomerGroup(null);
     setCustomerOrders([]);
+    setCustomerOrderHistory([]);
+    setOrderList([]);
+    setCheckoutRequested(false);
   };
 
   const refreshCustomerOrders = async () => {
     const ids = getStoredCustomerOrderIds();
     if (ids.length === 0) {
       setCustomerOrders([]);
+      setCustomerOrderHistory([]);
       return;
     }
 
     const results = await Promise.allSettled(
       ids.map((id) => fetchOrderStatus(id))
     );
-    const visibleOrders = results
+    const fetchedOrders = results
       .filter(
         (result): result is PromiseFulfilledResult<Order> =>
           result.status === "fulfilled"
       )
-      .map((result) => result.value)
-      .filter((order) => order.status !== "完了");
+      .map((result) => result.value);
+    const visibleOrders = fetchedOrders.filter(
+      (order) =>
+        order.status !== "完了" &&
+        !(order.status === "キャンセル" && order.cancel_confirmed_at)
+    );
+    const historyOrders = fetchedOrders.filter(
+      (order) =>
+        order.status === "完了" ||
+        (order.status === "キャンセル" && Boolean(order.cancel_confirmed_at))
+    );
 
     setCustomerOrders(visibleOrders);
-    saveStoredCustomerOrderIds(visibleOrders.map((order) => order.id));
+    setCustomerOrderHistory(historyOrders);
+    saveStoredCustomerOrderIds(fetchedOrders.map((order) => order.id));
   };
 
   useEffect(() => {
@@ -329,7 +355,7 @@ function CustomerOrderPage() {
       try {
         const group = await fetchCustomerGroup(customerGroup.id);
         if (group.closed_at) {
-          resetCustomerGroup();
+          resetCustomerSession();
           await refreshCustomerGroupOptions();
           return;
         }
@@ -361,7 +387,7 @@ function CustomerOrderPage() {
     return () => window.clearInterval(intervalId);
   }, [activeStaffCallId]);
 
-  const submitOrder = async (menu: MenuItem) => {
+  const addToOrderList = (menu: MenuItem) => {
     if (!customerGroup) {
       setError("先にお客様グループを作成してください");
       return;
@@ -373,30 +399,81 @@ function CustomerOrderPage() {
       return;
     }
 
+    setError(null);
+    setOrderList((prev) => {
+      const existing = prev.find((item) => item.menu_item_id === menu.id);
+      if (existing) {
+        return prev.map((item) =>
+          item.menu_item_id === menu.id
+            ? { ...item, quantity: item.quantity + quantity }
+            : item
+        );
+      }
+
+      return [
+        ...prev,
+        {
+          menu_item_id: menu.id,
+          name: menu.name,
+          quantity,
+        },
+      ];
+    });
+    setQuantityByMenuId((prev) => ({ ...prev, [menu.id]: "1" }));
+  };
+
+  const removeFromOrderList = (menuItemId: string) => {
+    setOrderList((prev) => prev.filter((item) => item.menu_item_id !== menuItemId));
+  };
+
+  const submitOrderList = async () => {
+    if (!customerGroup) {
+      setError("先にお客様グループを作成してください");
+      return;
+    }
+    if (orderList.length === 0) {
+      setError("注文リストにメニューを追加してください");
+      return;
+    }
+
     try {
-      setSubmittingMenuId(menu.id);
+      setSubmittingOrderList(true);
       setError(null);
-      const order = await createOrder({
-        menu_item_id: menu.id,
-        quantity,
-        customer_group_id: customerGroup.id,
-      });
+      const createdOrders = await Promise.all(
+        orderList.map((item) =>
+          createOrder({
+            menu_item_id: item.menu_item_id,
+            quantity: item.quantity,
+            customer_group_id: customerGroup.id,
+          })
+        )
+      );
       const orderIds = getStoredCustomerOrderIds();
-      saveStoredCustomerOrderIds([order.id, ...orderIds.filter((id) => id !== order.id)]);
+      saveStoredCustomerOrderIds([
+        ...createdOrders.map((order) => order.id),
+        ...orderIds.filter(
+          (id) => !createdOrders.some((order) => order.id === id)
+        ),
+      ]);
+      setOrderList([]);
       await refreshCustomerOrders();
-      setQuantityByMenuId((prev) => ({ ...prev, [menu.id]: "1" }));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setSubmittingMenuId(null);
+      setSubmittingOrderList(false);
     }
   };
 
   const callStaffFromCustomerPage = async () => {
+    if (!customerGroup) {
+      setError("注文開始後にスタッフを呼べます");
+      return;
+    }
+
     try {
       setCallingStaff(true);
       setError(null);
-      const call = await createStaffCall();
+      const call = await createStaffCall(customerGroup.id);
       setStaffCalled(true);
       setActiveStaffCallId(call.id);
     } catch (e) {
@@ -404,6 +481,12 @@ function CustomerOrderPage() {
     } finally {
       setCallingStaff(false);
     }
+  };
+
+  const requestCheckout = () => {
+    window.localStorage.setItem(CUSTOMER_CHECKOUT_REQUESTED_KEY, "true");
+    setCheckoutRequested(true);
+    setError(null);
   };
 
   const selectedGroupOption = customerGroupOptions.find(
@@ -433,31 +516,41 @@ function CustomerOrderPage() {
           boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
         }}
       >
-        <h1 style={{ margin: "0 0 8px" }}>注文</h1>
-        <p style={{ margin: "0 0 20px", color: "#4b5563" }}>
-          メニューと数量を選んで注文できます。
-        </p>
-        <button
-          onClick={callStaffFromCustomerPage}
-          disabled={callingStaff || staffCalled}
-          style={{
-            marginBottom: 16,
-            color: "#92400e",
-            backgroundColor: "#fff7ed",
-            border: "1px solid #fdba74",
-            borderRadius: 6,
-            fontWeight: 700,
-            padding: "10px 14px",
-            cursor: staffCalled ? "default" : "pointer",
-          }}
-        >
-          {staffCalled
-            ? "スタッフ呼び出し済み"
-            : callingStaff
-              ? "呼び出し中..."
+        {checkoutRequested && (
+          <h1 style={{ margin: 0, fontSize: 24 }}>本日はありがとうございました。</h1>
+        )}
+        {!checkoutRequested && (
+          <>
+            <h1 style={{ margin: "0 0 8px" }}>注文</h1>
+            <p style={{ margin: "0 0 20px", color: "#4b5563" }}>
+              メニューと数量を選んで注文できます。
+            </p>
+          </>
+        )}
+        {!checkoutRequested && customerGroup && (
+          <button
+            onClick={callStaffFromCustomerPage}
+            disabled={callingStaff || staffCalled}
+            style={{
+              marginBottom: 16,
+              color: "#92400e",
+              backgroundColor: "#fff7ed",
+              border: "1px solid #fdba74",
+              borderRadius: 6,
+              fontWeight: 700,
+              padding: "10px 14px",
+              cursor: staffCalled ? "default" : "pointer",
+            }}
+          >
+            {staffCalled
+              ? "スタッフ呼び出し済み"
+              : callingStaff
+                ? "呼び出し中..."
               : "スタッフを呼ぶ"}
-        </button>
+          </button>
+        )}
 
+        {!checkoutRequested && (
         <section
           style={{
             marginBottom: 16,
@@ -469,9 +562,34 @@ function CustomerOrderPage() {
         >
           <h2 style={{ margin: "0 0 8px", fontSize: 18 }}>卓番号</h2>
           {customerGroup ? (
-            <p style={{ margin: 0, fontWeight: 700 }}>
-              {customerGroup.label || "お客様"}で注文中
-            </p>
+            <div
+              style={{
+                display: "flex",
+                gap: 8,
+                alignItems: "center",
+                justifyContent: "space-between",
+                flexWrap: "wrap",
+              }}
+            >
+              <p style={{ margin: 0, fontWeight: 700 }}>
+                {customerGroup.label || "お客様"}で注文中
+              </p>
+              <button
+                type="button"
+                onClick={requestCheckout}
+                style={{
+                  color: "#fff",
+                  backgroundColor: "#111827",
+                  border: "1px solid #111827",
+                  borderRadius: 6,
+                  fontWeight: 700,
+                  padding: "8px 10px",
+                  cursor: "pointer",
+                }}
+              >
+                会計する
+              </button>
+            </div>
           ) : (
             <div
               style={{
@@ -510,14 +628,15 @@ function CustomerOrderPage() {
             </div>
           )}
         </section>
+        )}
 
-        {loading && <p>読み込み中...</p>}
-        {error && (
+        {!checkoutRequested && loading && <p>読み込み中...</p>}
+        {!checkoutRequested && error && (
           <p style={{ color: "red", whiteSpace: "pre-wrap" }}>
             エラー: {error}
           </p>
         )}
-        {customerGroup && customerOrders.length > 0 && (
+        {!checkoutRequested && customerGroup && customerOrders.length > 0 && (
           <section
             style={{
               marginBottom: 16,
@@ -527,7 +646,7 @@ function CustomerOrderPage() {
               background: "#f9fafb",
             }}
           >
-            <h2 style={{ margin: "0 0 8px", fontSize: 18 }}>注文リスト</h2>
+            <h2 style={{ margin: "0 0 8px", fontSize: 18 }}>注文中リスト</h2>
             <ul style={{ margin: 0, paddingLeft: 20 }}>
               {customerOrders.map((order) => {
                 const canCancel =
@@ -579,20 +698,109 @@ function CustomerOrderPage() {
           </section>
         )}
 
-        {!customerGroup ? (
+        {!checkoutRequested && customerGroup && customerOrderHistory.length > 0 && (
+          <section
+            style={{
+              marginBottom: 16,
+              padding: 12,
+              border: "1px solid #ddd",
+              borderRadius: 8,
+              background: "#fff",
+            }}
+          >
+            <h2 style={{ margin: "0 0 8px", fontSize: 18 }}>注文履歴</h2>
+            <ul style={{ margin: 0, paddingLeft: 20 }}>
+              {customerOrderHistory.map((order) => (
+                <li key={order.id} style={{ marginBottom: 8 }}>
+                  <div>
+                    <strong>{getJoinedName(order.menu_items)}</strong> × {order.quantity}
+                  </div>
+                  <div style={{ fontSize: 14, color: "#4b5563" }}>
+                    状態: {order.status}
+                    {order.completed_at &&
+                      ` / 完了: ${new Date(order.completed_at).toLocaleString()}`}
+                    {order.cancel_confirmed_at &&
+                      ` / キャンセル確認: ${new Date(order.cancel_confirmed_at).toLocaleString()}`}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {!checkoutRequested && customerGroup && (
+          <section
+            style={{
+              marginBottom: 16,
+              padding: 12,
+              border: "1px solid #ddd",
+              borderRadius: 8,
+              background: "#f9fafb",
+            }}
+          >
+            <h2 style={{ margin: "0 0 8px", fontSize: 18 }}>注文予定リスト</h2>
+            {orderList.length === 0 ? (
+              <p style={{ margin: 0, color: "#4b5563" }}>
+                メニューを選んでリストに追加してください。
+              </p>
+            ) : (
+              <>
+                <ul style={{ margin: "0 0 12px", paddingLeft: 20 }}>
+                  {orderList.map((item) => (
+                    <li key={item.menu_item_id} style={{ marginBottom: 8 }}>
+                      <div>
+                        <strong>{item.name}</strong> × {item.quantity}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeFromOrderList(item.menu_item_id)}
+                        disabled={submittingOrderList}
+                        style={{
+                          marginTop: 4,
+                          color: "#374151",
+                          backgroundColor: "#fff",
+                          border: "1px solid #d1d5db",
+                          borderRadius: 6,
+                          fontWeight: 700,
+                          padding: "4px 8px",
+                          cursor: "pointer",
+                        }}
+                      >
+                        削除
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <button
+                  type="button"
+                  onClick={submitOrderList}
+                  disabled={submittingOrderList}
+                  style={{
+                    ...buttonStyle,
+                    opacity: submittingOrderList ? 0.7 : 1,
+                  }}
+                >
+                  {submittingOrderList ? "注文中..." : "まとめて注文する"}
+                </button>
+              </>
+            )}
+          </section>
+        )}
+
+        {!checkoutRequested && !customerGroup ? (
           <p style={{ margin: 0, color: "#4b5563" }}>
             卓番号を選んで「注文開始」を押してください。
           </p>
-        ) : !loading && menuItems.length === 0 ? (
+        ) : !checkoutRequested && !loading && menuItems.length === 0 ? (
           <p>注文できるメニューはまだありません</p>
-        ) : (
+        ) : !checkoutRequested && (
           <div style={{ display: "grid", gap: 12 }}>
             {menuItems.map((menu) => (
               <section
                 key={menu.id}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "minmax(0, 1fr) 90px 96px",
+                  gridTemplateColumns: "minmax(0, 1fr) 90px 112px",
                   gap: 8,
                   alignItems: "center",
                   padding: 12,
@@ -616,14 +824,14 @@ function CustomerOrderPage() {
                   style={inputStyle}
                 />
                 <button
-                  onClick={() => submitOrder(menu)}
-                  disabled={submittingMenuId === menu.id || !customerGroup}
+                  onClick={() => addToOrderList(menu)}
+                  disabled={submittingOrderList || !customerGroup}
                   style={{
                     ...buttonStyle,
-                    opacity: submittingMenuId === menu.id || !customerGroup ? 0.7 : 1,
+                    opacity: submittingOrderList || !customerGroup ? 0.7 : 1,
                   }}
                 >
-                  注文する
+                  リストに追加
                 </button>
               </section>
             ))}
@@ -957,6 +1165,20 @@ const cancelEdit = () => {
   const pendingOrders = orders.filter(
     (order) => order.status === "調理待ち" || order.status === "調理中"
   );
+  const firstOrderIdByGroup = new Map<string, string>();
+
+  for (const order of [...orders].sort(
+    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+  )) {
+    const key = order.customer_group_id ?? "no-group";
+    if (!firstOrderIdByGroup.has(key)) {
+      firstOrderIdByGroup.set(key, order.id);
+    }
+  }
+
+  const isFirstOrder = (order: Order) =>
+    firstOrderIdByGroup.get(order.customer_group_id ?? "no-group") === order.id;
+
   const getCustomerGroupLabel = (order: Order) => {
     const group = Array.isArray(order.customer_groups)
       ? order.customer_groups[0]
@@ -969,6 +1191,13 @@ const cancelEdit = () => {
       ? order.customer_groups[0]
       : order.customer_groups;
     return group?.closed_at ?? null;
+  };
+
+  const getStaffCallGroupLabel = (call: StaffCall) => {
+    const group = Array.isArray(call.customer_groups)
+      ? call.customer_groups[0]
+      : call.customer_groups;
+    return group?.label?.trim() || "卓未設定";
   };
 
   const groupOrdersByCustomer = (targetOrders: Order[]) =>
@@ -1006,6 +1235,17 @@ const cancelEdit = () => {
 
   const formatOrderDate = (value: string | null) =>
     value ? new Date(value).toLocaleString() : "";
+
+  const formatOrderTime = (value: string) =>
+    new Date(value).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+  const getElapsedMinutes = (value: string) => {
+    const diffMs = Date.now() - new Date(value).getTime();
+    return Math.max(0, Math.floor(diffMs / 60000));
+  };
 
   const getOrderHistoryDateLabel = (order: Order) => {
     if (order.status === "完了") {
@@ -1668,9 +1908,28 @@ const notificationBadge = (count: number) =>
                         <li key={order.id} style={{ marginBottom: 8 }}>
                           <div>
                             <strong>{getJoinedName(order.menu_items)}</strong> × {order.quantity}
+                            {isFirstOrder(order) && (
+                              <span
+                                style={{
+                                  marginLeft: 8,
+                                  color: "#92400e",
+                                  backgroundColor: "#fff7ed",
+                                  border: "1px solid #fdba74",
+                                  borderRadius: 999,
+                                  padding: "2px 6px",
+                                  fontSize: 12,
+                                  fontWeight: 700,
+                                }}
+                              >
+                                ファーストオーダー
+                              </span>
+                            )}
                           </div>
                           <div style={{ fontSize: 14, color: "#4b5563" }}>
                             状態: {order.status}
+                          </div>
+                          <div style={{ fontSize: 14, color: "#4b5563" }}>
+                            経過: {getElapsedMinutes(order.created_at)}分 / 注文: {formatOrderTime(order.created_at)}
                           </div>
                           {order.status === "調理待ち" ? (
                             <button
@@ -1800,7 +2059,7 @@ const notificationBadge = (count: number) =>
                 {staffCalls.map((call) => (
                   <li key={call.id} style={{ marginBottom: 10 }}>
                     <div>
-                      <strong>スタッフ呼び出し</strong>
+                      <strong>{getStaffCallGroupLabel(call)}</strong>
                     </div>
                     <div style={{ fontSize: 14, color: "#4b5563" }}>
                       呼び出し: {new Date(call.created_at).toLocaleString()}
