@@ -4,6 +4,7 @@ import { createStockMovement, fetchStockMovements, deleteStockMovement, fetchWas
 import {
   addRecipe,
   cancelOrder,
+  cancelStaffCall,
   checkoutCustomerGroup,
   completeOrder,
   confirmStandaloneStaffCall,
@@ -25,6 +26,7 @@ import {
   fetchStaffCalls,
   getJoinedName,
   startCookingOrder,
+  updateMenuItem,
   type CustomerGroup,
   type CustomerGroupOption,
   type MenuItem,
@@ -185,6 +187,7 @@ function CustomerOrderPage() {
   const [customerOrdersOpen, setCustomerOrdersOpen] = useState(false);
   const [customerHistoryOpen, setCustomerHistoryOpen] = useState(false);
   const [orderListOpen, setOrderListOpen] = useState(false);
+  const [openMenuCategory, setOpenMenuCategory] = useState<string | null>(null);
   const [orderList, setOrderList] = useState<
     { menu_item_id: string; name: string; quantity: number }[]
   >([]);
@@ -208,9 +211,36 @@ function CustomerOrderPage() {
     color: "#fff",
     backgroundColor: "#2563eb",
     border: "1px solid #2563eb",
+  borderRadius: 6,
+  fontWeight: 700,
+  cursor: "pointer",
+  whiteSpace: "nowrap",
+  };
+
+  const actionBarItemStyle: React.CSSProperties = {
+    margin: 0,
+    padding: 0,
+    border: 0,
+    background: "transparent",
+  };
+
+  const compactHeaderButtonStyle: React.CSSProperties = {
+    width: "100%",
+    minHeight: 28,
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 8,
+    margin: 0,
+    padding: "5px 8px",
+    color: "#111827",
+    background: "#fff",
+    border: "1px solid #9ca3af",
     borderRadius: 6,
+    fontSize: 15,
     fontWeight: 700,
     cursor: "pointer",
+    textAlign: "left",
   };
 
   useEffect(() => {
@@ -311,6 +341,7 @@ function CustomerOrderPage() {
     setCustomerOrdersOpen(false);
     setCustomerHistoryOpen(false);
     setOrderListOpen(false);
+    setOpenMenuCategory(null);
     setOrderList([]);
     setCheckoutRequested(false);
   };
@@ -381,7 +412,7 @@ function CustomerOrderPage() {
     const intervalId = window.setInterval(async () => {
       try {
         const call = await fetchStaffCall(activeStaffCallId);
-        if (call.confirmed_at) {
+        if (call.confirmed_at || call.cancelled_at) {
           setActiveStaffCallId(null);
           setStaffCalled(false);
         }
@@ -479,6 +510,13 @@ function CustomerOrderPage() {
     try {
       setCallingStaff(true);
       setError(null);
+      if (staffCalled && activeStaffCallId) {
+        await cancelStaffCall(activeStaffCallId);
+        setStaffCalled(false);
+        setActiveStaffCallId(null);
+        return;
+      }
+
       const call = await createStaffCall(customerGroup.id);
       setStaffCalled(true);
       setActiveStaffCallId(call.id);
@@ -500,6 +538,31 @@ function CustomerOrderPage() {
   );
   const canStartCustomerGroup =
     Boolean(selectedGroupLabel) && !selectedGroupOption?.active_group;
+  const getCustomerMenuCategoryLabel = (menu: MenuItem) =>
+    menu.category?.trim() || "未分類";
+  const customerMenuCategoryGroups = Array.from(
+    menuItems
+      .reduce((map, menu) => {
+        const category = getCustomerMenuCategoryLabel(menu);
+        const current = map.get(category) ?? {
+          category,
+          menus: [] as MenuItem[],
+        };
+        current.menus.push(menu);
+        map.set(category, current);
+        return map;
+      }, new Map<string, { category: string; menus: MenuItem[] }>())
+      .values()
+  ).sort((a, b) => {
+    if (a.category === "その他") return 1;
+    if (b.category === "その他") return -1;
+    if (a.category === "未分類") return 1;
+    if (b.category === "未分類") return -1;
+    return a.category.localeCompare(b.category, "ja");
+  });
+  const openedMenuCategoryGroup = customerMenuCategoryGroups.find(
+    (group) => group.category === openMenuCategory
+  );
 
   return (
     <div
@@ -533,109 +596,196 @@ function CustomerOrderPage() {
             </p>
           </>
         )}
-        {!checkoutRequested && customerGroup && (
-          <button
-            onClick={callStaffFromCustomerPage}
-            disabled={callingStaff || staffCalled}
-            style={{
-              marginBottom: 16,
-              color: "#92400e",
-              backgroundColor: "#fff7ed",
-              border: "1px solid #fdba74",
-              borderRadius: 6,
-              fontWeight: 700,
-              padding: "10px 14px",
-              cursor: staffCalled ? "default" : "pointer",
-            }}
-          >
-            {staffCalled
-              ? "スタッフ呼び出し済み"
-              : callingStaff
-                ? "呼び出し中..."
-              : "スタッフを呼ぶ"}
-          </button>
-        )}
-
-        {!checkoutRequested && (
-        <section
-          style={{
-            marginBottom: 16,
-            padding: 12,
-            border: "1px solid #ddd",
-            borderRadius: 8,
-            background: "#f9fafb",
-          }}
-        >
-          <h2 style={{ margin: "0 0 8px", fontSize: 18 }}>卓番号</h2>
-          {customerGroup ? (
-            <div
-              style={{
-                display: "flex",
-                gap: 8,
-                alignItems: "center",
-                justifyContent: "space-between",
-                flexWrap: "wrap",
-              }}
-            >
-              <p style={{ margin: 0, fontWeight: 700 }}>
-                {customerGroup.label || "お客様"}で注文中
-              </p>
-              <button
-                type="button"
-                onClick={requestCheckout}
-                style={{
-                  color: "#fff",
-                  backgroundColor: "#111827",
-                  border: "1px solid #111827",
-                  borderRadius: 6,
-                  fontWeight: 700,
-                  padding: "8px 10px",
-                  cursor: "pointer",
-                }}
-              >
-                会計する
-              </button>
-            </div>
-          ) : (
+        {!checkoutRequested && customerGroup && menuItems.length > 0 && (
+          <div style={{ display: "grid", gap: 12, marginBottom: 12 }}>
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "minmax(0, 1fr) 120px",
+                gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
                 gap: 8,
               }}
             >
-              <select
-                value={selectedGroupLabel}
-                onChange={(e) => setSelectedGroupLabel(e.target.value)}
-                style={inputStyle}
-              >
-                {customerGroupOptions.map((option) => (
-                  <option
-                    key={option.label}
-                    value={option.label}
-                    disabled={Boolean(option.active_group)}
+              {customerMenuCategoryGroups.map((group) => {
+                const selected = openMenuCategory === group.category;
+
+                return (
+                  <button
+                    key={group.category}
+                    type="button"
+                    onClick={() =>
+                      setOpenMenuCategory(selected ? null : group.category)
+                    }
+                    style={{
+                      minHeight: 38,
+                      color: selected ? "#fff" : "#111827",
+                      backgroundColor: selected ? "#2563eb" : "#fff",
+                      border: selected ? "1px solid #2563eb" : "1px solid #d1d5db",
+                      borderRadius: 6,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
                   >
-                    {option.label}
-                    {option.active_group ? "（注文中）" : ""}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={startCustomerGroup}
-                disabled={creatingGroup || !canStartCustomerGroup}
+                    {group.category}
+                  </button>
+                );
+              })}
+            </div>
+
+            {openedMenuCategoryGroup && (
+              <section
+                key={openedMenuCategoryGroup.category}
                 style={{
-                  ...buttonStyle,
-                  opacity: creatingGroup || !canStartCustomerGroup ? 0.7 : 1,
+                  display: "grid",
+                  padding: 12,
+                  border: "1px solid #ddd",
+                  borderRadius: 8,
+                  gap: 10,
                 }}
               >
-                {creatingGroup ? "開始中..." : "注文開始"}
-              </button>
-            </div>
-          )}
-        </section>
+                <h2 style={{ margin: 0, fontSize: 18 }}>
+                  {openedMenuCategoryGroup.category}
+                </h2>
+                {openedMenuCategoryGroup.menus.map((menu) => (
+                  <div
+                    key={menu.id}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "minmax(0, 1fr) 90px 112px",
+                      gap: 8,
+                      alignItems: "center",
+                    }}
+                  >
+                    <strong>{menu.name}</strong>
+                    <input
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={quantityByMenuId[menu.id] ?? "1"}
+                      onChange={(e) =>
+                        setQuantityByMenuId((prev) => ({
+                          ...prev,
+                          [menu.id]: e.target.value,
+                        }))
+                      }
+                      aria-label={`${menu.name}の数量`}
+                      style={inputStyle}
+                    />
+                    <button
+                      onClick={() => addToOrderList(menu)}
+                      disabled={submittingOrderList || !customerGroup}
+                      style={{
+                        ...buttonStyle,
+                        opacity: submittingOrderList || !customerGroup ? 0.7 : 1,
+                      }}
+                    >
+                      リストに追加
+                    </button>
+                  </div>
+                ))}
+              </section>
+            )}
+          </div>
         )}
 
+        {!checkoutRequested && (
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 8,
+              marginBottom: 12,
+              alignItems: "center",
+            }}
+          >
+            <section
+              style={{
+                ...actionBarItemStyle,
+                display: "flex",
+                gap: 8,
+                alignItems: "center",
+                flex: customerGroup ? "0 0 auto" : "1 1 260px",
+              }}
+            >
+              {customerGroup ? (
+                  <button
+                    type="button"
+                    onClick={requestCheckout}
+                    style={{
+                      color: "#111827",
+                      backgroundColor: "#fff",
+                      border: "1px solid #9ca3af",
+                      borderRadius: 6,
+                      fontWeight: 700,
+                      padding: "5px 8px",
+                      cursor: "pointer",
+                    }}
+                  >
+                    会計
+                  </button>
+              ) : (
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "minmax(0, 1fr) 120px",
+                    gap: 8,
+                  }}
+                >
+                  <select
+                    value={selectedGroupLabel}
+                    onChange={(e) => setSelectedGroupLabel(e.target.value)}
+                    style={inputStyle}
+                  >
+                    {customerGroupOptions.map((option) => (
+                      <option
+                        key={option.label}
+                        value={option.label}
+                        disabled={Boolean(option.active_group)}
+                      >
+                        {option.label}
+                        {option.active_group ? "（注文中）" : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={startCustomerGroup}
+                    disabled={creatingGroup || !canStartCustomerGroup}
+                    style={{
+                      ...buttonStyle,
+                      opacity: creatingGroup || !canStartCustomerGroup ? 0.7 : 1,
+                    }}
+                  >
+                    {creatingGroup ? "開始中..." : "注文開始"}
+                  </button>
+                </div>
+              )}
+            </section>
+
+            {customerGroup && (
+              <section
+                style={{
+                  ...actionBarItemStyle,
+                  flex: "1 1 150px",
+                }}
+              >
+                <button
+                  onClick={callStaffFromCustomerPage}
+                  disabled={callingStaff}
+                  style={{
+                    ...compactHeaderButtonStyle,
+                    cursor: "pointer",
+                  }}
+                >
+                  <span>
+                    {staffCalled
+                      ? "呼び出しをキャンセル"
+                      : callingStaff
+                        ? "呼び出し中..."
+                        : "スタッフを呼ぶ"}
+                  </span>
+                </button>
+              </section>
+            )}
         {!checkoutRequested && loading && <p>読み込み中...</p>}
         {!checkoutRequested && error && (
           <p style={{ color: "red", whiteSpace: "pre-wrap" }}>
@@ -644,38 +794,14 @@ function CustomerOrderPage() {
         )}
         {!checkoutRequested && customerGroup && customerOrders.length > 0 && (
           <section
-            style={{
-              marginBottom: 16,
-              padding: 12,
-              border: "1px solid #ddd",
-              borderRadius: 8,
-              background: "#f9fafb",
-            }}
+            style={{ ...actionBarItemStyle, flex: "1 1 150px" }}
           >
             <button
               type="button"
               onClick={() => setCustomerOrdersOpen((open) => !open)}
-              style={{
-                width: "100%",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                gap: 8,
-                margin: 0,
-                padding: 0,
-                color: "#111827",
-                background: "transparent",
-                border: 0,
-                fontSize: 18,
-                fontWeight: 700,
-                cursor: "pointer",
-                textAlign: "left",
-              }}
+              style={compactHeaderButtonStyle}
             >
-              <span>注文中リスト（{customerOrders.length}件）</span>
-              <span style={{ fontSize: 14 }}>
-                {customerOrdersOpen ? "閉じる" : "見る"}
-              </span>
+              <span>注文中リスト</span>
             </button>
             {customerOrdersOpen && (
             <ul style={{ margin: "8px 0 0", paddingLeft: 20 }}>
@@ -732,38 +858,14 @@ function CustomerOrderPage() {
 
         {!checkoutRequested && customerGroup && customerOrderHistory.length > 0 && (
           <section
-            style={{
-              marginBottom: 16,
-              padding: 12,
-              border: "1px solid #ddd",
-              borderRadius: 8,
-              background: "#fff",
-            }}
+            style={{ ...actionBarItemStyle, flex: "1 1 150px" }}
           >
             <button
               type="button"
               onClick={() => setCustomerHistoryOpen((open) => !open)}
-              style={{
-                width: "100%",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                gap: 8,
-                margin: 0,
-                padding: 0,
-                color: "#111827",
-                background: "transparent",
-                border: 0,
-                fontSize: 18,
-                fontWeight: 700,
-                cursor: "pointer",
-                textAlign: "left",
-              }}
+              style={compactHeaderButtonStyle}
             >
-              <span>注文履歴（{customerOrderHistory.length}件）</span>
-              <span style={{ fontSize: 14 }}>
-                {customerHistoryOpen ? "閉じる" : "見る"}
-              </span>
+              <span>注文履歴</span>
             </button>
             {customerHistoryOpen && (
             <ul style={{ margin: "8px 0 0", paddingLeft: 20 }}>
@@ -788,38 +890,14 @@ function CustomerOrderPage() {
 
         {!checkoutRequested && customerGroup && (
           <section
-            style={{
-              marginBottom: 16,
-              padding: 12,
-              border: "1px solid #ddd",
-              borderRadius: 8,
-              background: "#f9fafb",
-            }}
+            style={{ ...actionBarItemStyle, flex: "1 1 170px" }}
           >
             <button
               type="button"
               onClick={() => setOrderListOpen((open) => !open)}
-              style={{
-                width: "100%",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                gap: 8,
-                margin: 0,
-                padding: 0,
-                color: "#111827",
-                background: "transparent",
-                border: 0,
-                fontSize: 18,
-                fontWeight: 700,
-                cursor: "pointer",
-                textAlign: "left",
-              }}
+              style={compactHeaderButtonStyle}
             >
-              <span>注文予定リスト（{orderList.length}件）</span>
-              <span style={{ fontSize: 14 }}>
-                {orderListOpen ? "閉じる" : "見る"}
-              </span>
+              <span>注文予定リスト</span>
             </button>
             {orderListOpen && orderList.length === 0 ? (
               <p style={{ margin: 0, color: "#4b5563" }}>
@@ -869,56 +947,16 @@ function CustomerOrderPage() {
           </section>
         )}
 
+          </div>
+        )}
+
         {!checkoutRequested && !customerGroup ? (
           <p style={{ margin: 0, color: "#4b5563" }}>
             卓番号を選んで「注文開始」を押してください。
           </p>
-        ) : !checkoutRequested && !loading && menuItems.length === 0 ? (
+        ) : !checkoutRequested && customerGroup && !loading && menuItems.length === 0 ? (
           <p>注文できるメニューはまだありません</p>
-        ) : !checkoutRequested && (
-          <div style={{ display: "grid", gap: 12 }}>
-            {menuItems.map((menu) => (
-              <section
-                key={menu.id}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "minmax(0, 1fr) 90px 112px",
-                  gap: 8,
-                  alignItems: "center",
-                  padding: 12,
-                  border: "1px solid #ddd",
-                  borderRadius: 8,
-                }}
-              >
-                <strong>{menu.name}</strong>
-                <input
-                  type="number"
-                  min="1"
-                  step="1"
-                  value={quantityByMenuId[menu.id] ?? "1"}
-                  onChange={(e) =>
-                    setQuantityByMenuId((prev) => ({
-                      ...prev,
-                      [menu.id]: e.target.value,
-                    }))
-                  }
-                  aria-label={`${menu.name}の数量`}
-                  style={inputStyle}
-                />
-                <button
-                  onClick={() => addToOrderList(menu)}
-                  disabled={submittingOrderList || !customerGroup}
-                  style={{
-                    ...buttonStyle,
-                    opacity: submittingOrderList || !customerGroup ? 0.7 : 1,
-                  }}
-                >
-                  リストに追加
-                </button>
-              </section>
-            ))}
-          </div>
-        )}
+        ) : null}
       </main>
     </div>
   );
@@ -954,7 +992,13 @@ function AdminApp({ onLogout }: { onLogout: () => void }) {
   const [recipeQuantity, setRecipeQuantity] = useState("1");
   const [orderMenuId, setOrderMenuId] = useState("");
   const [orderQuantity, setOrderQuantity] = useState("1");
+  const [menuFormOpen, setMenuFormOpen] = useState(false);
+  const [recipeFormOpen, setRecipeFormOpen] = useState(false);
   const [expandedRecipeMenuId, setExpandedRecipeMenuId] = useState<string | null>(null);
+  const [openRecipeCategory, setOpenRecipeCategory] = useState<string | null>(null);
+  const [editingMenuId, setEditingMenuId] = useState<string | null>(null);
+  const [editingMenuName, setEditingMenuName] = useState("");
+  const [editingMenuCategory, setEditingMenuCategory] = useState("");
   const [orderTab, setOrderTab] = useState<
     "received" | "history" | "canceled" | "staff-calls" | "manual" | "recipes"
   >("received");
@@ -1186,6 +1230,9 @@ const cancelEdit = () => {
     if (b.category === "未分類") return -1;
     return a.category.localeCompare(b.category, "ja");
   });
+  const openedRecipeCategoryGroup = menuCategoryGroups.find(
+    (group) => group.category === openRecipeCategory
+  );
 
   const categorySummaries = categories
     .map((category) => {
@@ -1415,6 +1462,29 @@ const cancelEdit = () => {
     return "#166534";
   };
 
+  const getAvailabilityStatus = (servings: number | null) => {
+    if (servings === null) return null;
+    if (servings === 0) {
+      return { label: "作成不可", color: "#dc2626", background: "#fef2f2" };
+    }
+    if (servings <= 5) {
+      return { label: "残り少", color: "#f97316", background: "#fff7ed" };
+    }
+    return null;
+  };
+
+  const getMenuCategoryAvailabilitySummary = (menus: MenuItem[]) => {
+    return menus.reduce(
+      (summary, menu) => {
+        const status = getAvailabilityStatus(getMenuAvailability(menu).servings);
+        if (status?.label === "作成不可") summary.unavailable += 1;
+        if (status?.label === "残り少") summary.low += 1;
+        return summary;
+      },
+      { unavailable: 0, low: 0 }
+    );
+  };
+
   const getDisplayStock = (stock: number) => Math.max(0, stock);
 
   const getStockColor = (stock: number, parLevel: number | null) => {
@@ -1470,6 +1540,41 @@ const cancelEdit = () => {
     }
   };
 
+  const startMenuEdit = (menu: MenuItem) => {
+    setEditingMenuId(menu.id);
+    setEditingMenuName(menu.name);
+    setEditingMenuCategory(menu.category ?? "");
+  };
+
+  const cancelMenuEdit = () => {
+    setEditingMenuId(null);
+    setEditingMenuName("");
+    setEditingMenuCategory("");
+  };
+
+  const saveMenuEdit = async () => {
+    if (!editingMenuId) return;
+    const name = editingMenuName.trim();
+    if (!name) {
+      setError("メニュー名を入力してください");
+      return;
+    }
+
+    try {
+      setError(null);
+      const updated = await updateMenuItem(editingMenuId, {
+        name,
+        category: editingMenuCategory.trim() || null,
+      });
+      if (recipeMenuId === editingMenuId) setRecipeMenuId(updated.id);
+      if (orderMenuId === editingMenuId) setOrderMenuId(updated.id);
+      cancelMenuEdit();
+      await loadOrderData();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   const removeMenu = async (menu: MenuItem) => {
     if (!confirm(`「${menu.name}」を削除しますか？（レシピも削除されます）`)) {
       return;
@@ -1481,6 +1586,7 @@ const cancelEdit = () => {
       if (recipeMenuId === menu.id) setRecipeMenuId("");
       if (orderMenuId === menu.id) setOrderMenuId("");
       if (expandedRecipeMenuId === menu.id) setExpandedRecipeMenuId(null);
+      if (openRecipeCategory === getMenuCategoryLabel(menu)) setOpenRecipeCategory(null);
       await loadOrderData();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -1631,6 +1737,8 @@ const buttonStyle: React.CSSProperties = {
   borderRadius: 6,
   fontWeight: 600,
   cursor: "pointer",
+  padding: "8px 10px",
+  whiteSpace: "nowrap",
 };
 
 const tabButtonStyle = (selected: boolean): React.CSSProperties => ({
@@ -1897,8 +2005,22 @@ const notificationBadge = (count: number) =>
         >
           {orderTab === "recipes" && (
           <div>
-            <h3 style={{ margin: "0 0 8px", fontSize: 16 }}>メニュー登録</h3>
-            <div style={{ display: "grid", gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => setMenuFormOpen((open) => !open)}
+              style={{
+                ...buttonStyle,
+                width: "100%",
+                textAlign: "left",
+                padding: "8px 10px",
+                background: menuFormOpen ? "#eff6ff" : "#fff",
+                borderColor: menuFormOpen ? "#2563eb" : "#9ca3af",
+              }}
+            >
+              {menuFormOpen ? "▼" : "▶"} メニュー登録
+            </button>
+            {menuFormOpen && (
+            <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
               <input
                 placeholder="メニュー名（例：唐揚げ定食）"
                 value={newMenuName}
@@ -1921,8 +2043,25 @@ const notificationBadge = (count: number) =>
                 追加
               </button>
             </div>
+            )}
 
-	            <h3 style={{ margin: "16px 0 8px", fontSize: 16 }}>レシピ登録</h3>
+	            <button
+	              type="button"
+	              onClick={() => setRecipeFormOpen((open) => !open)}
+	              style={{
+	                ...buttonStyle,
+	                width: "100%",
+	                textAlign: "left",
+	                marginTop: 12,
+	                padding: "8px 10px",
+	                background: recipeFormOpen ? "#eff6ff" : "#fff",
+	                borderColor: recipeFormOpen ? "#2563eb" : "#9ca3af",
+	              }}
+	            >
+	              {recipeFormOpen ? "▼" : "▶"} レシピ登録
+	            </button>
+	            {recipeFormOpen && (
+	            <>
 	            <p style={{ margin: "0 0 8px", fontSize: 14 }}>
 	              メニューを選び、そのメニュー1個を作るために使う食材と量を登録します。
 	            </p>
@@ -1973,6 +2112,8 @@ const notificationBadge = (count: number) =>
                 レシピに追加
               </button>
             </div>
+            </>
+            )}
           </div>
           )}
 
@@ -2232,7 +2373,12 @@ const notificationBadge = (count: number) =>
                 gap: 12,
               }}
             >
-              {menuCategoryGroups.map((group) => (
+              {(openedRecipeCategoryGroup ? [openedRecipeCategoryGroup] : menuCategoryGroups).map((group) => {
+                const categoryOpened = openRecipeCategory === group.category;
+                const categoryAvailability =
+                  getMenuCategoryAvailabilitySummary(group.menus);
+
+                return (
                 <section
                   key={group.category}
                   style={{
@@ -2241,17 +2387,50 @@ const notificationBadge = (count: number) =>
                     padding: 12,
                   }}
                 >
-                  <h4 style={{ margin: "0 0 4px", fontSize: 15 }}>
-                    {group.category}
-                  </h4>
-                  <p style={{ margin: "0 0 10px", color: "#4b5563", fontSize: 13 }}>
-                    {group.menus.length}件 / レシピ未登録{" "}
-                    {group.menus.filter((menu) => menu.recipes.length === 0).length}件
-                  </p>
-                  <div style={{ display: "grid", gap: 10 }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpenRecipeCategory(categoryOpened ? null : group.category);
+                      setExpandedRecipeMenuId(null);
+                    }}
+                    style={{
+                      width: "100%",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: 0,
+                      color: "#111827",
+                      background: "transparent",
+                      border: 0,
+                      fontSize: 15,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      textAlign: "left",
+                    }}
+                  >
+                    <span>{group.category}</span>
+                    <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {categoryAvailability.unavailable > 0 && (
+                        <span style={{ color: "#dc2626", fontSize: 13 }}>
+                          作成不可 {categoryAvailability.unavailable}
+                        </span>
+                      )}
+                      {categoryAvailability.low > 0 && (
+                        <span style={{ color: "#f97316", fontSize: 13 }}>
+                          残り少 {categoryAvailability.low}
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                  {categoryOpened && (
+                  <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
                     {group.menus.map((menu) => {
                       const expanded = expandedRecipeMenuId === menu.id;
                       const availability = getMenuAvailability(menu);
+                      const availabilityStatus = getAvailabilityStatus(
+                        availability.servings
+                      );
 
                       return (
                         <div
@@ -2263,12 +2442,56 @@ const notificationBadge = (count: number) =>
                             background: "#fff",
                           }}
                         >
+                    {editingMenuId === menu.id && (
+                      <div
+                        style={{
+                          display: "grid",
+                          gap: 8,
+                          marginBottom: 10,
+                          padding: 10,
+                          borderRadius: 8,
+                          background: "#f9fafb",
+                          border: "1px solid #e5e7eb",
+                        }}
+                      >
+                        <input
+                          value={editingMenuName}
+                          onChange={(e) => setEditingMenuName(e.target.value)}
+                          placeholder="メニュー名"
+                          style={inputStyle}
+                        />
+                        <input
+                          value={editingMenuCategory}
+                          onChange={(e) => setEditingMenuCategory(e.target.value)}
+                          placeholder="カテゴリ"
+                          list="menu-category-options"
+                          style={inputStyle}
+                        />
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <button
+                            onClick={saveMenuEdit}
+                            disabled={loading}
+                            style={buttonStyle}
+                          >
+                            保存
+                          </button>
+                          <button
+                            onClick={cancelMenuEdit}
+                            disabled={loading}
+                            style={buttonStyle}
+                          >
+                            キャンセル
+                          </button>
+                        </div>
+                      </div>
+                    )}
                     <div
                       style={{
                         display: "flex",
                         justifyContent: "space-between",
                         gap: 8,
                         alignItems: "center",
+                        flexWrap: "wrap",
                       }}
                     >
                       <button
@@ -2277,7 +2500,7 @@ const notificationBadge = (count: number) =>
                         }
                         style={{
                           ...buttonStyle,
-                          flex: 1,
+                          flex: "1 1 220px",
                           textAlign: "left",
                           padding: "8px 10px",
                           background: expanded ? "#eff6ff" : "#fff",
@@ -2300,11 +2523,33 @@ const notificationBadge = (count: number) =>
                             作成可能: {availability.servings}件
                           </span>
                         )}
+                        {availabilityStatus && (
+                          <span
+                            style={{
+                              marginLeft: 8,
+                              padding: "2px 6px",
+                              borderRadius: 999,
+                              fontSize: 12,
+                              color: availabilityStatus.color,
+                              backgroundColor: availabilityStatus.background,
+                              fontWeight: 700,
+                            }}
+                          >
+                            {availabilityStatus.label}
+                          </span>
+                        )}
+                      </button>
+                      <button
+                        onClick={() => startMenuEdit(menu)}
+                        disabled={loading}
+                        style={{ ...buttonStyle, flex: "0 0 auto" }}
+                      >
+                        メニュー編集
                       </button>
                       <button
                         onClick={() => removeMenu(menu)}
                         disabled={loading}
-                        style={buttonStyle}
+                        style={{ ...buttonStyle, flex: "0 0 auto" }}
                       >
                         メニュー削除
                       </button>
@@ -2375,8 +2620,10 @@ const notificationBadge = (count: number) =>
                       );
                     })}
                   </div>
+                  )}
                 </section>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
