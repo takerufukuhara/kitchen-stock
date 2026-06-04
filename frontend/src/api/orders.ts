@@ -47,6 +47,7 @@ export type StaffCall = {
   customer_group_id: string | null;
   created_at: string;
   confirmed_at: string | null;
+  cancelled_at: string | null;
   customer_groups?: { label: string | null } | { label: string | null }[] | null;
 };
 
@@ -69,6 +70,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || `${path} failed: ${res.status}`);
+  }
+
+  if (res.status === 204) {
+    return undefined as T;
   }
 
   return (await res.json()) as T;
@@ -97,6 +102,20 @@ export async function createMenuItem(params: {
 }): Promise<MenuItem> {
   return request<MenuItem>("/menu-items", {
     method: "POST",
+    headers: adminHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(params),
+  });
+}
+
+export async function updateMenuItem(
+  id: string,
+  params: {
+    name?: string;
+    category?: string | null;
+  }
+): Promise<MenuItem> {
+  return request<MenuItem>(`/menu-items/${id}`, {
+    method: "PATCH",
     headers: adminHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(params),
   });
@@ -196,6 +215,13 @@ export async function cancelOrder(id: string): Promise<Order> {
   });
 }
 
+export async function deleteOrder(id: string): Promise<void> {
+  await request(`/orders/${id}`, {
+    method: "DELETE",
+    headers: adminHeaders(),
+  });
+}
+
 export async function confirmOrderCancellation(id: string): Promise<Order> {
   return request<Order>(`/orders/${id}/confirm-cancel`, {
     method: "PATCH",
@@ -226,6 +252,12 @@ export async function createStaffCall(customer_group_id: string): Promise<StaffC
 
 export async function fetchStaffCall(id: string): Promise<StaffCall> {
   return request<StaffCall>(`/staff-calls/${id}`);
+}
+
+export async function cancelStaffCall(id: string): Promise<StaffCall> {
+  return request<StaffCall>(`/staff-calls/${id}/cancel`, {
+    method: "PATCH",
+  });
 }
 
 export async function fetchStaffCalls(): Promise<StaffCall[]> {

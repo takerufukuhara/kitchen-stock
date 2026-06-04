@@ -318,6 +318,39 @@ app.post("/menu-items", requireAdmin, async (req, res) => {
   }
 });
 
+app.patch("/menu-items/:id", requireAdmin, async (req, res) => {
+  try {
+    const { name, category } = req.body ?? {};
+    const update: Record<string, string | null> = {};
+
+    if (name !== undefined) {
+      const trimmedName = String(name).trim();
+      if (!trimmedName) {
+        return res.status(400).json({ error: "メニュー名は必須です" });
+      }
+      update.name = trimmedName;
+    }
+
+    if (category !== undefined) {
+      const trimmedCategory =
+        category === null ? "" : String(category).trim();
+      update.category = trimmedCategory || null;
+    }
+
+    const { data, error } = await supabase
+      .from("menu_items")
+      .update(update)
+      .eq("id", req.params.id)
+      .select()
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
 app.delete("/menu-items/:id", requireAdmin, async (req, res) => {
   try {
     const menuItemId = req.params.id;
@@ -399,8 +432,9 @@ app.get("/staff-calls", requireAdmin, async (_req, res) => {
   try {
     const { data, error } = await supabase
       .from("staff_calls")
-      .select("id,customer_group_id,created_at,confirmed_at,customer_groups(label)")
+      .select("id,customer_group_id,created_at,confirmed_at,cancelled_at,customer_groups(label)")
       .is("confirmed_at", null)
+      .is("cancelled_at", null)
       .order("created_at", { ascending: false });
 
     if (error) return res.status(500).json({ error: error.message });
@@ -414,7 +448,7 @@ app.get("/staff-calls/:id", async (req, res) => {
   try {
     const { data, error } = await supabase
       .from("staff_calls")
-      .select("id,customer_group_id,created_at,confirmed_at,customer_groups(label)")
+      .select("id,customer_group_id,created_at,confirmed_at,cancelled_at,customer_groups(label)")
       .eq("id", req.params.id)
       .single();
 
@@ -452,6 +486,22 @@ app.patch("/staff-calls/:id/confirm", requireAdmin, async (req, res) => {
     const { data, error } = await supabase
       .from("staff_calls")
       .update({ confirmed_at: new Date().toISOString() })
+      .eq("id", req.params.id)
+      .select()
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.patch("/staff-calls/:id/cancel", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("staff_calls")
+      .update({ cancelled_at: new Date().toISOString() })
       .eq("id", req.params.id)
       .select()
       .single();
@@ -625,6 +675,34 @@ app.patch("/orders/:id/cancel", async (req, res) => {
 
     if (error) return res.status(500).json({ error: error.message });
     res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.delete("/orders/:id", requireAdmin, async (req, res) => {
+  try {
+    const orderId = req.params.id;
+
+    const { data: order, error: orderError } = await supabase
+      .from("orders")
+      .select("id,status")
+      .eq("id", orderId)
+      .single();
+
+    if (orderError) return res.status(500).json({ error: orderError.message });
+    if (!order) return res.status(404).json({ error: "注文が見つかりません" });
+    if (order.status !== "調理待ち") {
+      return res.status(400).json({ error: "調理待ちの注文だけ削除できます" });
+    }
+
+    const { error } = await supabase
+      .from("orders")
+      .delete()
+      .eq("id", orderId);
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.status(204).send();
   } catch (e) {
     res.status(500).json({ error: String(e) });
   }
