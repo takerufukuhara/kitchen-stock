@@ -1011,7 +1011,9 @@ const [editPar, setEditPar] = useState<string>(""); // 入力欄は文字列で�
 
 const [categoryFilter, setCategoryFilter] = useState("");
 const [onlyLow, setOnlyLow] = useState(false);
-const [activeTab, setActiveTab] = useState<"inventory" | "low-stock" | "waste" | "orders">("inventory");
+const [activeTab, setActiveTab] = useState<
+  "inventory" | "low-stock" | "waste" | "menu" | "orders"
+>("inventory");
 
 
 
@@ -1157,8 +1159,10 @@ const cancelEdit = () => {
     if (activeTab === "waste") {
       loadWasteData();
     }
-    if (activeTab === "orders") {
+    if (activeTab === "orders" || activeTab === "menu") {
       loadOrderData();
+    }
+    if (activeTab === "orders") {
       const intervalId = window.setInterval(loadOrderData, 5000);
       return () => window.clearInterval(intervalId);
     }
@@ -1858,6 +1862,12 @@ const notificationBadge = (count: number) =>
           廃棄分析
         </button>
         <button
+          onClick={() => setActiveTab("menu")}
+          style={tabButtonStyle(activeTab === "menu")}
+        >
+          メニュー管理
+        </button>
+        <button
           onClick={() => setActiveTab("orders")}
           style={tabButtonStyle(activeTab === "orders")}
         >
@@ -2233,8 +2243,13 @@ const notificationBadge = (count: number) =>
         </div>
         )}
 
-        <div style={{ marginTop: 24 }}>
-          <h3 style={{ margin: "0 0 8px", fontSize: 16 }}>メニュー・レシピ</h3>
+      </section>
+      )}
+
+      {activeTab === "menu" && (
+      <section style={sectionStyle}>
+        <h2 style={{ margin: "0 0 12px" }}>メニュー管理</h2>
+        <div>
           <button
             type="button"
             onClick={() => setMenuFormOpen((open) => !open)}
