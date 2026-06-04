@@ -457,6 +457,7 @@ function CustomerOrderPage() {
         },
       ];
     });
+    setOrderListOpen(true);
     setQuantityByMenuId((prev) => ({ ...prev, [menu.id]: "1" }));
   };
 
@@ -995,6 +996,7 @@ function AdminApp({ onLogout }: { onLogout: () => void }) {
   const [recipeQuantity, setRecipeQuantity] = useState("1");
   const [orderMenuId, setOrderMenuId] = useState("");
   const [orderQuantity, setOrderQuantity] = useState("1");
+  const [openOrderSections, setOpenOrderSections] = useState<Record<string, boolean>>({});
   const [menuFormOpen, setMenuFormOpen] = useState(false);
   const [recipeFormOpen, setRecipeFormOpen] = useState(false);
   const [expandedRecipeMenuId, setExpandedRecipeMenuId] = useState<string | null>(null);
@@ -1376,6 +1378,14 @@ const cancelEdit = () => {
         groupCanceledOrders.length + groupStaffCalls.length + groupStaffCallOrders.length,
     };
   });
+  const getOrderSectionKey = (groupId: string, section: string) =>
+    `${groupId}:${section}`;
+  const isOrderSectionOpen = (groupId: string, section: string) =>
+    Boolean(openOrderSections[getOrderSectionKey(groupId, section)]);
+  const toggleOrderSection = (groupId: string, section: string) => {
+    const key = getOrderSectionKey(groupId, section);
+    setOpenOrderSections((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
   const itemsById = new Map(items.map((item) => [item.id, item]));
 
   const formatOrderDate = (value: string | null) =>
@@ -1782,6 +1792,23 @@ const notificationBadgeStyle: React.CSSProperties = {
 const notificationBadge = (count: number) =>
   count > 0 ? <span style={notificationBadgeStyle}>{count}</span> : null;
 
+const orderSectionHeaderStyle: React.CSSProperties = {
+  position: "relative",
+  width: "100%",
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 8,
+  padding: 0,
+  color: "#111827",
+  background: "transparent",
+  border: 0,
+  fontSize: 15,
+  fontWeight: 700,
+  cursor: "pointer",
+  textAlign: "left",
+};
+
 
   return (
   <div
@@ -2013,11 +2040,21 @@ const notificationBadge = (count: number) =>
                       backgroundColor: "#fff",
                     }}
                   >
-                    <h4 style={{ margin: "0 0 8px", fontSize: 15 }}>注文中</h4>
-                    {pendingOrders.length === 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => toggleOrderSection(group.id, "pending")}
+                      style={orderSectionHeaderStyle}
+                    >
+                      <span>
+                        {isOrderSectionOpen(group.id, "pending") ? "▼" : "▶"} 注文中
+                      </span>
+                      {notificationBadge(pendingOrders.length)}
+                    </button>
+                    {isOrderSectionOpen(group.id, "pending") && (
+                    pendingOrders.length === 0 ? (
                       <p style={{ margin: 0, color: "#4b5563" }}>注文中の商品はありません</p>
                     ) : (
-                      <ul style={{ margin: 0, paddingLeft: 20 }}>
+                      <ul style={{ margin: "8px 0 0", paddingLeft: 20 }}>
                       {pendingOrders.map((order) => (
                         <li key={order.id} style={{ marginBottom: 8 }}>
                           <div>
@@ -2077,7 +2114,7 @@ const notificationBadge = (count: number) =>
                         </li>
                       ))}
                     </ul>
-                    )}
+                    ))}
                   </div>
 
                   <div
@@ -2088,10 +2125,17 @@ const notificationBadge = (count: number) =>
                       backgroundColor: "#fff",
                     }}
                   >
-                    <h4 style={{ margin: "0 0 8px", fontSize: 15 }}>
-                      手動注文
-                    </h4>
-                    <div style={{ display: "grid", gap: 8 }}>
+                    <button
+                      type="button"
+                      onClick={() => toggleOrderSection(group.id, "manual")}
+                      style={orderSectionHeaderStyle}
+                    >
+                      <span>
+                        {isOrderSectionOpen(group.id, "manual") ? "▼" : "▶"} 手動注文
+                      </span>
+                    </button>
+                    {isOrderSectionOpen(group.id, "manual") && (
+                    <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
                       <select
                         value={orderMenuId}
                         onChange={(e) => setOrderMenuId(e.target.value)}
@@ -2116,6 +2160,7 @@ const notificationBadge = (count: number) =>
                         この卓に追加
                       </button>
                     </div>
+                    )}
                   </div>
 
                   <div
@@ -2126,14 +2171,21 @@ const notificationBadge = (count: number) =>
                       backgroundColor: "#fff",
                     }}
                   >
-                    <h4 style={{ margin: "0 0 8px", fontSize: 15 }}>
-                      キャンセル
+                    <button
+                      type="button"
+                      onClick={() => toggleOrderSection(group.id, "canceled")}
+                      style={orderSectionHeaderStyle}
+                    >
+                      <span>
+                        {isOrderSectionOpen(group.id, "canceled") ? "▼" : "▶"} キャンセル
+                      </span>
                       {notificationBadge(canceledOrders.length)}
-                    </h4>
-                    {canceledOrders.length === 0 ? (
+                    </button>
+                    {isOrderSectionOpen(group.id, "canceled") && (
+                    canceledOrders.length === 0 ? (
                       <p style={{ margin: 0, color: "#4b5563" }}>未確認のキャンセルはありません</p>
                     ) : (
-                      <ul style={{ margin: 0, paddingLeft: 20 }}>
+                      <ul style={{ margin: "8px 0 0", paddingLeft: 20 }}>
                         {canceledOrders.map((order) => (
                           <li key={order.id} style={{ marginBottom: 8 }}>
                           <div>
@@ -2154,7 +2206,7 @@ const notificationBadge = (count: number) =>
                         </li>
                         ))}
                       </ul>
-                    )}
+                    ))}
                   </div>
 
                   <div
@@ -2165,14 +2217,21 @@ const notificationBadge = (count: number) =>
                       backgroundColor: "#fff",
                     }}
                   >
-                    <h4 style={{ margin: "0 0 8px", fontSize: 15 }}>
-                      呼び出し
+                    <button
+                      type="button"
+                      onClick={() => toggleOrderSection(group.id, "staff-calls")}
+                      style={orderSectionHeaderStyle}
+                    >
+                      <span>
+                        {isOrderSectionOpen(group.id, "staff-calls") ? "▼" : "▶"} 呼び出し
+                      </span>
                       {notificationBadge(staffCalls.length + staffCallOrders.length)}
-                    </h4>
-                    {staffCalls.length + staffCallOrders.length === 0 ? (
+                    </button>
+                    {isOrderSectionOpen(group.id, "staff-calls") && (
+                    staffCalls.length + staffCallOrders.length === 0 ? (
                       <p style={{ margin: 0, color: "#4b5563" }}>未確認の呼び出しはありません</p>
                     ) : (
-                      <ul style={{ margin: 0, paddingLeft: 20 }}>
+                      <ul style={{ margin: "8px 0 0", paddingLeft: 20 }}>
                         {staffCalls.map((call) => (
                           <li key={call.id} style={{ marginBottom: 8 }}>
                             <div style={{ fontSize: 14, color: "#4b5563" }}>
@@ -2207,7 +2266,7 @@ const notificationBadge = (count: number) =>
                           </li>
                         ))}
                       </ul>
-                    )}
+                    ))}
                   </div>
 
                   <div
@@ -2218,11 +2277,20 @@ const notificationBadge = (count: number) =>
                       backgroundColor: "#fff",
                     }}
                   >
-                    <h4 style={{ margin: "0 0 8px", fontSize: 15 }}>注文履歴</h4>
-                    {historyOrders.length === 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => toggleOrderSection(group.id, "history")}
+                      style={orderSectionHeaderStyle}
+                    >
+                      <span>
+                        {isOrderSectionOpen(group.id, "history") ? "▼" : "▶"} 注文履歴
+                      </span>
+                    </button>
+                    {isOrderSectionOpen(group.id, "history") && (
+                    historyOrders.length === 0 ? (
                       <p style={{ margin: 0, color: "#4b5563" }}>完了・キャンセル済みの注文はありません</p>
                     ) : (
-                      <ul style={{ margin: 0, paddingLeft: 20 }}>
+                      <ul style={{ margin: "8px 0 0", paddingLeft: 20 }}>
                         {historyOrders.map((order) => (
                           <li key={order.id} style={{ marginBottom: 8 }}>
                             <div>
@@ -2234,7 +2302,7 @@ const notificationBadge = (count: number) =>
                           </li>
                         ))}
                       </ul>
-                    )}
+                    ))}
                   </div>
                 </div>
               </section>
