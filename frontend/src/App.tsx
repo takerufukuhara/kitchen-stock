@@ -1254,7 +1254,6 @@ const cancelEdit = () => {
       ).length;
       return {
         category,
-        itemCount: categoryItems.length,
         lowCount,
       };
     })
@@ -2297,7 +2296,7 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                               <strong>{getJoinedName(order.menu_items)}</strong> × {order.quantity}
                             </div>
                             <div style={{ fontSize: 14, color: "#4b5563" }}>
-                              状態: {order.status} / {getOrderHistoryDateLabel(order)}
+                              {getOrderHistoryDateLabel(order)}
                             </div>
                           </li>
                         ))}
@@ -2878,8 +2877,10 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                     }
                     style={{
                       ...buttonStyle,
+                      position: "relative",
                       textAlign: "left",
                       padding: 12,
+                      paddingRight: summary.lowCount > 0 ? 42 : 12,
                       borderRadius: 8,
                       border: selected ? "2px solid #2563eb" : "1px solid #ddd",
                       background: selected ? "#eff6ff" : "#fff",
@@ -2887,15 +2888,27 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                     }}
                   >
                     <strong>{summary.category}</strong>
-                    <div style={{ marginTop: 8, fontSize: 14 }}>
-                      商品数: {summary.itemCount}
-                    </div>
-                    <div style={{ fontSize: 14 }}>
-                      低在庫:{" "}
-                      <span style={{ color: summary.lowCount > 0 ? "red" : "#333" }}>
+                    {summary.lowCount > 0 && (
+                      <span
+                        style={{
+                          position: "absolute",
+                          top: 6,
+                          right: 6,
+                          minWidth: 22,
+                          height: 22,
+                          padding: "0 6px",
+                          borderRadius: 999,
+                          background: "#dc2626",
+                          color: "#fff",
+                          fontSize: 12,
+                          fontWeight: 800,
+                          lineHeight: "22px",
+                          textAlign: "center",
+                        }}
+                      >
                         {summary.lowCount}
                       </span>
-                    </div>
+                    )}
                   </button>
                 );
               })}
@@ -3157,7 +3170,6 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                           {h.delta >= 0
                             ? `${h.reason ?? "仕入れ"} +${h.delta}${item.unit}`
                             : `${h.reason ?? "使用"} -${Math.abs(h.delta)}${item.unit}`}
-                          {h.reason && ` / ${h.reason}`}
 
                           <button
                             style={{ marginLeft: 8 }}
