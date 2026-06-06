@@ -1065,7 +1065,7 @@ const cancelEdit = () => {
       setQtyById((prev) => {
         const next = { ...prev };
         for (const it of data) {
-          if (next[it.id] === undefined) next[it.id] = "1";
+          if (next[it.id] === undefined) next[it.id] = "0";
         }
         return next;
       });
@@ -1141,7 +1141,7 @@ const cancelEdit = () => {
     sign: 1 | -1,
     reason: string
   ) => {
-    const raw = qtyById[itemId] ?? "1";
+    const raw = qtyById[itemId] ?? "0";
     const qty = Number(raw);
 
     // 入力チェック（初心者がハマりやすい）
@@ -1151,6 +1151,63 @@ const cancelEdit = () => {
     }
 
     await moveStock(itemId, sign * qty, reason);
+    setQtyById((prev) => ({ ...prev, [itemId]: "0" }));
+  };
+
+  const moveSelectedQuantities = async (sign: 1 | -1, reason: string) => {
+    const movements = visibleItems
+      .map((item) => ({
+        item,
+        qty: Number(qtyById[item.id] ?? "0"),
+      }))
+      .filter(({ qty }) => Number.isFinite(qty) && qty > 0);
+
+    if (movements.length === 0) {
+      setError("数量を1以上入力した商品がありません");
+      return;
+    }
+
+    const operationLabel = reason === "棚卸し修正" ? "在庫修正" : reason;
+    const targetLines = movements
+      .map(({ item, qty }) => `・${item.name}: ${qty}${item.unit}`)
+      .join("\n");
+
+    if (
+      !confirm(
+        `${operationLabel}を実行しますか？\n\n対象商品:\n${targetLines}`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
+      await Promise.all(
+        movements.map(({ item, qty }) =>
+          createStockMovement({
+            item_id: item.id,
+            delta: sign * qty,
+            reason,
+          })
+        )
+      );
+      setQtyById((prev) => {
+        const next = { ...prev };
+        for (const { item } of movements) {
+          next[item.id] = "0";
+        }
+        return next;
+      });
+      await loadItems();
+      if (reason === "廃棄") {
+        await loadWasteData();
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -2919,10 +2976,11 @@ const orderSectionHeaderStyle: React.CSSProperties = {
       <div
         style={{
           display: "flex",
-          justifyContent: "flex-start",
+          justifyContent: "space-between",
           alignItems: "center",
           gap: 12,
           marginTop: 16,
+          flexWrap: "wrap",
         }}
       >
         <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -2933,6 +2991,21 @@ const orderSectionHeaderStyle: React.CSSProperties = {
           />
           低在庫のみ
         </label>
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button onClick={() => moveSelectedQuantities(1, "仕入れ")} disabled={loading}>
+            まとめて仕入れ
+          </button>
+          <button onClick={() => moveSelectedQuantities(-1, "使用")} disabled={loading}>
+            まとめて使用
+          </button>
+          <button onClick={() => moveSelectedQuantities(-1, "廃棄")} disabled={loading}>
+            まとめて廃棄
+          </button>
+          <button onClick={() => moveSelectedQuantities(-1, "棚卸し修正")} disabled={loading}>
+            まとめて在庫修正
+          </button>
+        </div>
       </div>
 
       {loading && <p>読み込み中...</p>}
@@ -3062,7 +3135,10 @@ const orderSectionHeaderStyle: React.CSSProperties = {
               ) : (
                 <>
                   <input
-                    value={qtyById[item.id] ?? "1"}
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={qtyById[item.id] ?? "0"}
                     onChange={(e) =>
                       setQtyById((prev) => ({
                         ...prev,
