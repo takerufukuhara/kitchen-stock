@@ -112,6 +112,7 @@ function AdminLoginPage() {
 
   return (
     <div
+      className="customer-page"
       style={{
         minHeight: "100vh",
         backgroundColor: "#f4f6f8",
@@ -578,6 +579,7 @@ function CustomerOrderPage() {
       }}
     >
       <main
+        className="customer-shell"
         style={{
           maxWidth: 720,
           margin: "0 auto",
@@ -649,6 +651,7 @@ function CustomerOrderPage() {
                 </h2>
                 {openedMenuCategoryGroup.menus.map((menu) => (
                   <div
+                    className="customer-menu-row"
                     key={menu.id}
                     style={{
                       display: "grid",
@@ -1868,6 +1871,7 @@ const orderSectionHeaderStyle: React.CSSProperties = {
 
   return (
   <div
+    className="admin-page"
     style={{
       minHeight: "100vh",
       backgroundColor: "#f4f6f8",
@@ -1878,6 +1882,7 @@ const orderSectionHeaderStyle: React.CSSProperties = {
     }}
   >
     <div
+      className="admin-shell"
       style={{
         maxWidth: 1000,
         margin: "0 auto",
@@ -1889,6 +1894,7 @@ const orderSectionHeaderStyle: React.CSSProperties = {
       }}
     >
       <div
+        className="admin-header"
         style={{
           display: "flex",
           justifyContent: "space-between",
@@ -1919,6 +1925,7 @@ const orderSectionHeaderStyle: React.CSSProperties = {
       </div>
 
       <nav
+        className="admin-nav"
         style={{
           display: "flex",
           flexWrap: "wrap",
@@ -1961,6 +1968,7 @@ const orderSectionHeaderStyle: React.CSSProperties = {
       {activeTab === "low-stock" && (
       <>
       <div
+        className="admin-two-column"
         style={{
           display: "grid",
           gridTemplateColumns: "minmax(0, 1.1fr) minmax(300px, 0.9fr)",
@@ -2050,6 +2058,7 @@ const orderSectionHeaderStyle: React.CSSProperties = {
           <p style={{ margin: 0 }}>使用中の卓はありません</p>
         ) : (
         <div
+          className="order-table-grid"
           style={{
             display: "grid",
             gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
@@ -2207,6 +2216,7 @@ const orderSectionHeaderStyle: React.CSSProperties = {
 
                       <input
                         placeholder="注文数"
+                        inputMode="decimal"
                         value={orderQuantity}
                         onChange={(e) => setOrderQuantity(e.target.value)}
                         style={inputStyle}
@@ -2471,6 +2481,7 @@ const orderSectionHeaderStyle: React.CSSProperties = {
               1個あたりの使用量
               <input
                 placeholder="例：15"
+                inputMode="decimal"
                 value={recipeQuantity}
                 onChange={(e) => setRecipeQuantity(e.target.value)}
                 style={inputStyle}
@@ -2877,6 +2888,7 @@ const orderSectionHeaderStyle: React.CSSProperties = {
           </datalist>
           <input
             placeholder="基準在庫（任意）"
+            inputMode="decimal"
             value={newPar}
             onChange={(e) => setNewPar(e.target.value)}
             style={inputStyle}
@@ -3015,6 +3027,7 @@ const orderSectionHeaderStyle: React.CSSProperties = {
         </p>
       )}
 
+      <div className="inventory-table-scroll">
       <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 20 }}>
   <thead>
     <tr style={{ background: "#f0f2f5" }}>
@@ -3061,6 +3074,7 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                     value={editPar}
                     onChange={(e) => setEditPar(e.target.value)}
                     placeholder="par_level（空でなし）"
+                    inputMode="decimal"
                     style={{ width: 140, marginRight: 8 }}
                   />
                 </>
@@ -3135,9 +3149,7 @@ const orderSectionHeaderStyle: React.CSSProperties = {
               ) : (
                 <>
                   <input
-                    type="number"
-                    min="0"
-                    step="0.01"
+                    inputMode="decimal"
                     value={qtyById[item.id] ?? "0"}
                     onChange={(e) =>
                       setQtyById((prev) => ({
@@ -3287,6 +3299,7 @@ const orderSectionHeaderStyle: React.CSSProperties = {
     })}
   </tbody>
 </table>
+</div>
 
 
       {!loading && !error && items.length === 0 && (
