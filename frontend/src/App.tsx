@@ -1018,6 +1018,8 @@ function AdminApp({ onLogout }: { onLogout: () => void }) {
   const [recipeFormOpen, setRecipeFormOpen] = useState(false);
   const [expandedRecipeMenuId, setExpandedRecipeMenuId] = useState<string | null>(null);
   const [openRecipeCategory, setOpenRecipeCategory] = useState<string | null>(null);
+  const [openPrepCategory, setOpenPrepCategory] = useState<string | null>(null);
+  const [expandedPrepMenuId, setExpandedPrepMenuId] = useState<string | null>(null);
   const [editingMenuId, setEditingMenuId] = useState<string | null>(null);
   const [editingMenuName, setEditingMenuName] = useState("");
   const [editingMenuCategory, setEditingMenuCategory] = useState("");
@@ -1031,7 +1033,7 @@ const [editPar, setEditPar] = useState<string>(""); // 入力欄は文字列で�
 const [categoryFilter, setCategoryFilter] = useState("");
 const [onlyLow, setOnlyLow] = useState(false);
 const [activeTab, setActiveTab] = useState<
-  "inventory" | "low-stock" | "waste" | "menu" | "orders"
+  "inventory" | "low-stock" | "waste" | "menu" | "prep" | "orders"
 >("inventory");
 
 
@@ -1227,6 +1229,32 @@ const cancelEdit = () => {
     }
   };
 
+  const addItem = async () => {
+    try {
+      setError(null);
+      const par = normalizeNumberInput(newPar);
+      const parLevel = par === "" ? null : parseNumberInput(newPar);
+      if (par !== "" && !Number.isFinite(parLevel)) {
+        setError("基準在庫は数値か空欄にしてください");
+        return;
+      }
+      await createItem({
+        name: newName.trim(),
+        unit: newUnit.trim(),
+        category: newCategory.trim() || null,
+        par_level: parLevel,
+      });
+      setNewName("");
+      setNewUnit("");
+      setNewCategory("");
+      setNewPar("");
+      setItemFormOpen(false);
+      await loadItems();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   useEffect(() => {
     loadItems();
   }, []);
@@ -1235,7 +1263,7 @@ const cancelEdit = () => {
     if (activeTab === "waste") {
       loadWasteData();
     }
-    if (activeTab === "orders" || activeTab === "menu") {
+    if (activeTab === "orders" || activeTab === "menu" || activeTab === "prep") {
       loadOrderData();
     }
     if (activeTab === "orders") {
@@ -1591,6 +1619,18 @@ const cancelEdit = () => {
       { unavailable: 0, low: 0 }
     );
   };
+
+  const prepCategoryGroups = menuCategoryGroups
+    .map((group) => ({
+      category: group.category,
+      menus: group.menus.filter((menu) =>
+        Boolean(getAvailabilityStatus(getMenuAvailability(menu).servings))
+      ),
+    }))
+    .filter((group) => group.menus.length > 0);
+  const openedPrepCategoryGroup = prepCategoryGroups.find(
+    (group) => group.category === openPrepCategory
+  );
 
   const getStockColor = (stock: number, parLevel: number | null) => {
     const displayStock = getDisplayStock(stock);
@@ -2002,6 +2042,12 @@ const orderSectionHeaderStyle: React.CSSProperties = {
           style={tabButtonStyle(activeTab === "menu")}
         >
           メニュー管理
+        </button>
+        <button
+          onClick={() => setActiveTab("prep")}
+          style={tabButtonStyle(activeTab === "prep")}
+        >
+          仕込み管理
         </button>
         <button
           onClick={() => setActiveTab("orders")}
@@ -2821,6 +2867,174 @@ const orderSectionHeaderStyle: React.CSSProperties = {
       </section>
       )}
 
+      {activeTab === "prep" && (
+      <section style={sectionStyle}>
+        <h2 style={{ margin: "0 0 12px" }}>仕込み管理</h2>
+
+        {prepCategoryGroups.length === 0 ? (
+          <p style={{ margin: 0 }}>仕込みが必要なメニューはありません</p>
+        ) : (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+              gap: 12,
+            }}
+          >
+            {(openedPrepCategoryGroup ? [openedPrepCategoryGroup] : prepCategoryGroups).map((group) => {
+              const categoryOpened = openPrepCategory === group.category;
+              const categoryAvailability =
+                getMenuCategoryAvailabilitySummary(group.menus);
+
+              return (
+                <section
+                  key={group.category}
+                  style={{
+                    border: "1px solid #ddd",
+                    borderRadius: 8,
+                    padding: 12,
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpenPrepCategory(categoryOpened ? null : group.category);
+                      setExpandedPrepMenuId(null);
+                    }}
+                    style={{
+                      width: "100%",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: 0,
+                      color: "#111827",
+                      background: "transparent",
+                      border: 0,
+                      fontSize: 15,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      textAlign: "left",
+                    }}
+                  >
+                    <span>{group.category}</span>
+                    <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {categoryAvailability.unavailable > 0 && (
+                        <span style={{ color: "#dc2626", fontSize: 13 }}>
+                          作成不可 {categoryAvailability.unavailable}
+                        </span>
+                      )}
+                      {categoryAvailability.low > 0 && (
+                        <span style={{ color: "#f97316", fontSize: 13 }}>
+                          残り少 {categoryAvailability.low}
+                        </span>
+                      )}
+                    </span>
+                  </button>
+
+                  {categoryOpened && (
+                  <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
+                    {group.menus.map((menu) => {
+                      const expanded = expandedPrepMenuId === menu.id;
+                      const availability = getMenuAvailability(menu);
+                      const availabilityStatus = getAvailabilityStatus(
+                        availability.servings
+                      );
+
+                      return (
+                        <div
+                          key={menu.id}
+                          style={{
+                            padding: 10,
+                            borderRadius: 8,
+                            border: "1px solid #e5e7eb",
+                            background: "#fff",
+                          }}
+                        >
+                          <button
+                            onClick={() =>
+                              setExpandedPrepMenuId(expanded ? null : menu.id)
+                            }
+                            style={{
+                              ...buttonStyle,
+                              width: "100%",
+                              textAlign: "left",
+                              padding: "8px 10px",
+                              background: expanded ? "#eff6ff" : "#fff",
+                              borderColor: expanded ? "#2563eb" : "#9ca3af",
+                            }}
+                          >
+                            {expanded ? "▼" : "▶"} {menu.name}
+                            <span
+                              style={{
+                                marginLeft: 8,
+                                fontSize: 13,
+                                color: getAvailabilityColor(availability.servings),
+                                fontWeight: 700,
+                              }}
+                            >
+                              作成可能: {availability.servings ?? 0}件
+                            </span>
+                            {availabilityStatus && (
+                              <span
+                                style={{
+                                  marginLeft: 8,
+                                  padding: "2px 6px",
+                                  borderRadius: 999,
+                                  fontSize: 12,
+                                  color: availabilityStatus.color,
+                                  backgroundColor: availabilityStatus.background,
+                                  fontWeight: 700,
+                                }}
+                              >
+                                {availabilityStatus.label}
+                              </span>
+                            )}
+                          </button>
+
+                          {expanded && (
+                            <div
+                              style={{
+                                marginTop: 10,
+                                padding: 10,
+                                borderRadius: 8,
+                                background: "#f9fafb",
+                                border: "1px solid #e5e7eb",
+                              }}
+                            >
+                              <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                                仕込み確認
+                              </div>
+                              {availability.ingredients.length === 0 ? (
+                                <p style={{ margin: 0 }}>レシピ未登録</p>
+                              ) : (
+                                <ul style={{ margin: 0, paddingLeft: 20 }}>
+                                  {availability.ingredients.map((ingredient) => (
+                                    <li key={ingredient.itemId} style={{ marginBottom: 4 }}>
+                                      {ingredient.name}: 在庫{" "}
+                                      {formatStockQuantity(ingredient.currentStock)}
+                                      {ingredient.unit} / 1件{" "}
+                                      {ingredient.requiredQty}
+                                      {ingredient.unit}
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  )}
+                </section>
+              );
+            })}
+          </div>
+        )}
+      </section>
+      )}
+
       {activeTab === "waste" && (
       <section style={sectionStyle}>
         <h2 style={{ margin: "0 0 12px" }}>廃棄分析</h2>
@@ -2888,104 +3102,6 @@ const orderSectionHeaderStyle: React.CSSProperties = {
 
       {activeTab === "inventory" && (
       <>
-      <section style={{ ...sectionStyle, marginTop: 0 }}>
-        <button
-          type="button"
-          onClick={() => setItemFormOpen((open) => !open)}
-          style={{
-            ...buttonStyle,
-            width: "100%",
-            textAlign: "left",
-            padding: "8px 10px",
-            background: itemFormOpen ? "#eff6ff" : "#fff",
-            borderColor: itemFormOpen ? "#2563eb" : "#9ca3af",
-          }}
-        >
-          {itemFormOpen ? "▼" : "▶"} 商品追加
-        </button>
-
-        {itemFormOpen && (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-            gap: 8,
-            alignItems: "center",
-            marginTop: 8,
-          }}
-        >
-          <input
-            placeholder="商品名（例：トマト）"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            style={inputStyle}
-          />
-          <input
-            placeholder="単位（例：個, g, 本）"
-            value={newUnit}
-            list="unit-options"
-            onChange={(e) => setNewUnit(e.target.value)}
-            style={inputStyle}
-          />
-          <datalist id="unit-options">
-            {unitOptions.map((unit) => (
-              <option key={unit} value={unit} />
-            ))}
-          </datalist>
-          <input
-            placeholder="カテゴリ（例：野菜）"
-            value={newCategory}
-            list="category-options"
-            onChange={(e) => setNewCategory(e.target.value)}
-            style={inputStyle}
-          />
-          <datalist id="category-options">
-            {categoryOptions.map((category) => (
-              <option key={category} value={category} />
-            ))}
-          </datalist>
-          <input
-            placeholder="基準在庫（任意）"
-            inputMode="decimal"
-            value={newPar}
-            onChange={(e) => setNewPar(e.target.value)}
-            style={inputStyle}
-          />
-
-          <button
-            onClick={async () => {
-              try {
-                setError(null);
-                const par = normalizeNumberInput(newPar);
-                const parLevel = par === "" ? null : parseNumberInput(newPar);
-                if (par !== "" && !Number.isFinite(parLevel)) {
-                  setError("基準在庫は数値か空欄にしてください");
-                  return;
-                }
-                await createItem({
-                  name: newName.trim(),
-                  unit: newUnit.trim(),
-                  category: newCategory.trim() || null,
-                  par_level: parLevel,
-                });
-                setNewName("");
-                setNewUnit("");
-                setNewCategory("");
-                setNewPar("");
-                await loadItems();
-              } catch (e) {
-                setError(e instanceof Error ? e.message : String(e));
-              }
-            }}
-            disabled={loading}
-            style={{ minHeight: 36 }}
-          >
-            追加
-          </button>
-        </div>
-        )}
-      </section>
-
         <section style={sectionStyle}>
           <h2 style={{ margin: "0 0 12px" }}>カテゴリ別まとめ</h2>
 
@@ -3060,16 +3176,25 @@ const orderSectionHeaderStyle: React.CSSProperties = {
           flexWrap: "wrap",
         }}
       >
-        <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <input
-            type="checkbox"
-            checked={onlyLow}
-            onChange={(e) => setOnlyLow(e.target.checked)}
-          />
-          低在庫のみ
-        </label>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <input
+              type="checkbox"
+              checked={onlyLow}
+              onChange={(e) => setOnlyLow(e.target.checked)}
+            />
+            在庫基準未満
+          </label>
+        </div>
 
         <div className="inventory-bulk-actions" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={() => setItemFormOpen((open) => !open)}
+            disabled={loading}
+          >
+            商品追加
+          </button>
           <button onClick={() => moveSelectedQuantities(1, "仕入れ")} disabled={loading}>
             まとめて仕入れ
           </button>
@@ -3084,6 +3209,62 @@ const orderSectionHeaderStyle: React.CSSProperties = {
           </button>
         </div>
       </div>
+
+      {itemFormOpen && (
+      <section style={sectionStyle}>
+        <h3 style={{ margin: "0 0 8px", fontSize: 16 }}>商品追加</h3>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+            gap: 8,
+            alignItems: "center",
+          }}
+        >
+          <input
+            placeholder="商品名（例：トマト）"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            style={inputStyle}
+          />
+          <input
+            placeholder="単位（例：個, g, 本）"
+            value={newUnit}
+            list="unit-options"
+            onChange={(e) => setNewUnit(e.target.value)}
+            style={inputStyle}
+          />
+          <datalist id="unit-options">
+            {unitOptions.map((unit) => (
+              <option key={unit} value={unit} />
+            ))}
+          </datalist>
+          <input
+            placeholder="カテゴリ（例：野菜）"
+            value={newCategory}
+            list="category-options"
+            onChange={(e) => setNewCategory(e.target.value)}
+            style={inputStyle}
+          />
+          <datalist id="category-options">
+            {categoryOptions.map((category) => (
+              <option key={category} value={category} />
+            ))}
+          </datalist>
+          <input
+            placeholder="基準在庫（任意）"
+            inputMode="decimal"
+            value={newPar}
+            onChange={(e) => setNewPar(e.target.value)}
+            style={inputStyle}
+          />
+
+          <button onClick={addItem} disabled={loading} style={{ minHeight: 36 }}>
+            追加
+          </button>
+        </div>
+      </section>
+      )}
 
       {loading && <p>読み込み中...</p>}
       {error && (
