@@ -1011,6 +1011,7 @@ function AdminApp({ onLogout }: { onLogout: () => void }) {
   const [newMenuPrepRequired, setNewMenuPrepRequired] = useState(false);
   const [recipeMenuId, setRecipeMenuId] = useState("");
   const [recipeItemId, setRecipeItemId] = useState("");
+  const [recipeItemInput, setRecipeItemInput] = useState("");
   const [recipeQuantity, setRecipeQuantity] = useState("1");
   const [orderMenuId, setOrderMenuId] = useState("");
   const [orderQuantity, setOrderQuantity] = useState("1");
@@ -1081,6 +1082,7 @@ const cancelEdit = () => {
 
       if (!recipeItemId && data.length > 0) {
         setRecipeItemId(data[0].id);
+        setRecipeItemInput(data[0].name);
       }
 
       setQtyById((prev) => {
@@ -1311,6 +1313,13 @@ const cancelEdit = () => {
     const orderDiff = getCategoryOrder(a) - getCategoryOrder(b);
     if (orderDiff !== 0) return orderDiff;
     return a.localeCompare(b, "ja");
+  });
+
+  const recipeItemOptions = [...items].sort((a, b) => {
+    const orderDiff =
+      getCategoryOrder(getCategoryLabel(a)) - getCategoryOrder(getCategoryLabel(b));
+    if (orderDiff !== 0) return orderDiff;
+    return a.name.localeCompare(b.name, "ja");
   });
 
   const unitOptions = Array.from(
@@ -1672,8 +1681,21 @@ const cancelEdit = () => {
 
   const addRecipeItem = async () => {
     const quantity = parseNumberInput(recipeQuantity);
-    if (!recipeMenuId || !recipeItemId || !Number.isFinite(quantity) || quantity <= 0) {
-      setError("メニュー、食材、1以上の使用量を入力してください");
+    const inputName = recipeItemInput.trim();
+    const selectedItem =
+      items.find((item) => item.id === recipeItemId && item.name === inputName) ??
+      items.find((item) => item.name === inputName);
+
+    if (!recipeMenuId) {
+      setError("メニューを選択してください");
+      return;
+    }
+    if (!inputName || !selectedItem) {
+      setError("そのような商品はありません");
+      return;
+    }
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      setError("1以上の使用量を入力してください");
       return;
     }
 
@@ -1681,10 +1703,12 @@ const cancelEdit = () => {
       setError(null);
       await addRecipe({
         menu_item_id: recipeMenuId,
-        item_id: recipeItemId,
+        item_id: selectedItem.id,
         quantity,
       });
       setRecipeQuantity("1");
+      setRecipeItemId(selectedItem.id);
+      setRecipeItemInput(selectedItem.name);
       await loadOrderData();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -2584,18 +2608,27 @@ const orderSectionHeaderStyle: React.CSSProperties = {
 
             <label style={fieldLabelStyle}>
               使用する食材
-              <select
-                value={recipeItemId}
-                onChange={(e) => setRecipeItemId(e.target.value)}
+              <input
+                value={recipeItemInput}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  const matchedItem = items.find((item) => item.name === value);
+                  setRecipeItemInput(value);
+                  setRecipeItemId(matchedItem?.id ?? "");
+                }}
+                placeholder="食材名を入力"
+                list="recipe-item-options"
                 style={inputStyle}
-              >
-                <option value="">食材を選択</option>
-                {items.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name}（{item.unit}）
-                  </option>
+              />
+              <datalist id="recipe-item-options">
+                {recipeItemOptions.map((item) => (
+                  <option
+                    key={item.id}
+                    value={item.name}
+                    label={`${getCategoryLabel(item)} / ${item.unit}`}
+                  />
                 ))}
-              </select>
+              </datalist>
             </label>
 
             <label style={fieldLabelStyle}>
