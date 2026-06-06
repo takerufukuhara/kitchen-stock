@@ -1008,6 +1008,7 @@ function AdminApp({ onLogout }: { onLogout: () => void }) {
 
   const [newMenuName, setNewMenuName] = useState("");
   const [newMenuCategory, setNewMenuCategory] = useState("");
+  const [newMenuPrepRequired, setNewMenuPrepRequired] = useState(false);
   const [recipeMenuId, setRecipeMenuId] = useState("");
   const [recipeItemId, setRecipeItemId] = useState("");
   const [recipeQuantity, setRecipeQuantity] = useState("1");
@@ -1023,6 +1024,7 @@ function AdminApp({ onLogout }: { onLogout: () => void }) {
   const [editingMenuId, setEditingMenuId] = useState<string | null>(null);
   const [editingMenuName, setEditingMenuName] = useState("");
   const [editingMenuCategory, setEditingMenuCategory] = useState("");
+  const [editingMenuPrepRequired, setEditingMenuPrepRequired] = useState(false);
 
   const [editingId, setEditingId] = useState<string | null>(null);
 const [editName, setEditName] = useState("");
@@ -1623,8 +1625,10 @@ const cancelEdit = () => {
   const prepCategoryGroups = menuCategoryGroups
     .map((group) => ({
       category: group.category,
-      menus: group.menus.filter((menu) =>
-        Boolean(getAvailabilityStatus(getMenuAvailability(menu).servings))
+      menus: group.menus.filter(
+        (menu) =>
+          menu.prep_required &&
+          Boolean(getAvailabilityStatus(getMenuAvailability(menu).servings))
       ),
     }))
     .filter((group) => group.menus.length > 0);
@@ -1653,9 +1657,11 @@ const cancelEdit = () => {
       const created = await createMenuItem({
         name,
         category: newMenuCategory.trim() || null,
+        prep_required: newMenuPrepRequired,
       });
       setNewMenuName("");
       setNewMenuCategory("");
+      setNewMenuPrepRequired(false);
       setRecipeMenuId(created.id);
       setOrderMenuId(created.id);
       await loadOrderData();
@@ -1689,12 +1695,14 @@ const cancelEdit = () => {
     setEditingMenuId(menu.id);
     setEditingMenuName(menu.name);
     setEditingMenuCategory(menu.category ?? "");
+    setEditingMenuPrepRequired(Boolean(menu.prep_required));
   };
 
   const cancelMenuEdit = () => {
     setEditingMenuId(null);
     setEditingMenuName("");
     setEditingMenuCategory("");
+    setEditingMenuPrepRequired(false);
   };
 
   const saveMenuEdit = async () => {
@@ -1710,6 +1718,7 @@ const cancelEdit = () => {
       const updated = await updateMenuItem(editingMenuId, {
         name,
         category: editingMenuCategory.trim() || null,
+        prep_required: editingMenuPrepRequired,
       });
       if (recipeMenuId === editingMenuId) setRecipeMenuId(updated.id);
       if (orderMenuId === editingMenuId) setOrderMenuId(updated.id);
@@ -2522,6 +2531,14 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                 <option key={category} value={category} />
               ))}
             </datalist>
+            <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <input
+                type="checkbox"
+                checked={newMenuPrepRequired}
+                onChange={(e) => setNewMenuPrepRequired(e.target.checked)}
+              />
+              仕込み対象にする
+            </label>
             <button onClick={addMenu} disabled={loading}>
               追加
             </button>
@@ -2704,6 +2721,16 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                           list="menu-category-options"
                           style={inputStyle}
                         />
+                        <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <input
+                            type="checkbox"
+                            checked={editingMenuPrepRequired}
+                            onChange={(e) =>
+                              setEditingMenuPrepRequired(e.target.checked)
+                            }
+                          />
+                          仕込み対象にする
+                        </label>
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                           <button
                             onClick={saveMenuEdit}
@@ -2872,7 +2899,9 @@ const orderSectionHeaderStyle: React.CSSProperties = {
         <h2 style={{ margin: "0 0 12px" }}>仕込み管理</h2>
 
         {prepCategoryGroups.length === 0 ? (
-          <p style={{ margin: 0 }}>仕込みが必要なメニューはありません</p>
+          <p style={{ margin: 0 }}>
+            仕込み対象で、作成可能数が少ないメニューはありません
+          </p>
         ) : (
           <div
             style={{

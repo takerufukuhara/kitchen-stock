@@ -257,7 +257,7 @@ app.get("/public/menu-items", async (_req, res) => {
   try {
     const { data, error } = await supabase
       .from("menu_items")
-      .select("id,name,category")
+      .select("id,name,category,prep_required")
       .order("name", { ascending: true });
 
     if (error) return res.status(500).json({ error: error.message });
@@ -297,7 +297,7 @@ app.get("/menu-items", requireAdmin, async (_req, res) => {
 
 app.post("/menu-items", requireAdmin, async (req, res) => {
   try {
-    const { name, category } = req.body ?? {};
+    const { name, category, prep_required } = req.body ?? {};
     const trimmedCategory =
       category === undefined || category === null ? "" : String(category).trim();
 
@@ -307,7 +307,13 @@ app.post("/menu-items", requireAdmin, async (req, res) => {
 
     const { data, error } = await supabase
       .from("menu_items")
-      .insert([{ name: String(name).trim(), category: trimmedCategory || null }])
+      .insert([
+        {
+          name: String(name).trim(),
+          category: trimmedCategory || null,
+          prep_required: Boolean(prep_required),
+        },
+      ])
       .select()
       .single();
 
@@ -320,8 +326,8 @@ app.post("/menu-items", requireAdmin, async (req, res) => {
 
 app.patch("/menu-items/:id", requireAdmin, async (req, res) => {
   try {
-    const { name, category } = req.body ?? {};
-    const update: Record<string, string | null> = {};
+    const { name, category, prep_required } = req.body ?? {};
+    const update: Record<string, string | null | boolean> = {};
 
     if (name !== undefined) {
       const trimmedName = String(name).trim();
@@ -335,6 +341,10 @@ app.patch("/menu-items/:id", requireAdmin, async (req, res) => {
       const trimmedCategory =
         category === null ? "" : String(category).trim();
       update.category = trimmedCategory || null;
+    }
+
+    if (prep_required !== undefined) {
+      update.prep_required = Boolean(prep_required);
     }
 
     const { data, error } = await supabase

@@ -19,6 +19,7 @@ export type MenuItem = {
   id: string;
   name: string;
   category: string | null;
+  prep_required: boolean;
   created_at?: string;
   recipes: Recipe[];
 };
@@ -99,6 +100,7 @@ export async function fetchPublicMenuItems(): Promise<MenuItem[]> {
 export async function createMenuItem(params: {
   name: string;
   category?: string | null;
+  prep_required?: boolean;
 }): Promise<MenuItem> {
   return request<MenuItem>("/menu-items", {
     method: "POST",
@@ -112,6 +114,7 @@ export async function updateMenuItem(
   params: {
     name?: string;
     category?: string | null;
+    prep_required?: boolean;
   }
 ): Promise<MenuItem> {
   return request<MenuItem>(`/menu-items/${id}`, {
