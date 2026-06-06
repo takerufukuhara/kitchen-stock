@@ -45,6 +45,17 @@ const CUSTOMER_ORDER_IDS_KEY = "kitchen-stock-customer-order-ids";
 const CUSTOMER_GROUP_ID_KEY = "kitchen-stock-customer-group-id";
 const CUSTOMER_CHECKOUT_REQUESTED_KEY = "kitchen-stock-checkout-requested";
 
+const normalizeNumberInput = (value: string) =>
+  value
+    .replace(/[０-９]/g, (char) =>
+      String.fromCharCode(char.charCodeAt(0) - 0xfee0)
+    )
+    .replace(/[．。]/g, ".")
+    .replace(/[－ー]/g, "-")
+    .trim();
+
+const parseNumberInput = (value: string) => Number(normalizeNumberInput(value));
+
 export default function App() {
   const path = window.location.pathname.replace(/\/+$/, "") || "/";
 
@@ -123,6 +134,7 @@ function AdminLoginPage() {
       }}
     >
       <main
+        className="login-shell"
         style={{
           maxWidth: 420,
           margin: "0 auto",
@@ -432,7 +444,7 @@ function CustomerOrderPage() {
       return;
     }
 
-    const quantity = Number(quantityByMenuId[menu.id] ?? "1");
+    const quantity = parseNumberInput(quantityByMenuId[menu.id] ?? "1");
     if (!Number.isFinite(quantity) || quantity <= 0) {
       setError("数量は1以上の数値を入力してください");
       return;
@@ -694,6 +706,7 @@ function CustomerOrderPage() {
 
         {!checkoutRequested && (
           <div
+            className="customer-action-bar"
             style={{
               display: "flex",
               flexWrap: "wrap",
@@ -729,6 +742,7 @@ function CustomerOrderPage() {
                   </button>
               ) : (
                 <div
+                  className="customer-start-grid"
                   style={{
                     display: "grid",
                     gridTemplateColumns: "minmax(0, 1fr) 120px",
@@ -1068,7 +1082,7 @@ const cancelEdit = () => {
       setQtyById((prev) => {
         const next = { ...prev };
         for (const it of data) {
-          if (next[it.id] === undefined) next[it.id] = "0";
+          if (next[it.id] === undefined) next[it.id] = "";
         }
         return next;
       });
@@ -1144,8 +1158,8 @@ const cancelEdit = () => {
     sign: 1 | -1,
     reason: string
   ) => {
-    const raw = qtyById[itemId] ?? "0";
-    const qty = Number(raw);
+    const raw = qtyById[itemId] ?? "";
+    const qty = parseNumberInput(raw);
 
     // 入力チェック（初心者がハマりやすい）
     if (!Number.isFinite(qty) || qty <= 0) {
@@ -1154,14 +1168,14 @@ const cancelEdit = () => {
     }
 
     await moveStock(itemId, sign * qty, reason);
-    setQtyById((prev) => ({ ...prev, [itemId]: "0" }));
+    setQtyById((prev) => ({ ...prev, [itemId]: "" }));
   };
 
   const moveSelectedQuantities = async (sign: 1 | -1, reason: string) => {
     const movements = visibleItems
       .map((item) => ({
         item,
-        qty: Number(qtyById[item.id] ?? "0"),
+        qty: parseNumberInput(qtyById[item.id] ?? ""),
       }))
       .filter(({ qty }) => Number.isFinite(qty) && qty > 0);
 
@@ -1198,7 +1212,7 @@ const cancelEdit = () => {
       setQtyById((prev) => {
         const next = { ...prev };
         for (const { item } of movements) {
-          next[item.id] = "0";
+          next[item.id] = "";
         }
         return next;
       });
@@ -1309,8 +1323,15 @@ const cancelEdit = () => {
         (item) => getCategoryLabel(item) === category
       );
       const lowCount = categoryItems.filter(
-        (item) =>
-          item.par_level !== null && item.current_stock < item.par_level
+        (item) => {
+          const displayStock = Math.max(0, item.current_stock);
+          return (
+            displayStock === 0 ||
+            (item.par_level !== null &&
+              item.par_level > 0 &&
+              displayStock <= item.par_level * 0.3)
+          );
+        }
       ).length;
       return {
         category,
@@ -1579,7 +1600,7 @@ const cancelEdit = () => {
   };
 
   const addRecipeItem = async () => {
-    const quantity = Number(recipeQuantity);
+    const quantity = parseNumberInput(recipeQuantity);
     if (!recipeMenuId || !recipeItemId || !Number.isFinite(quantity) || quantity <= 0) {
       setError("メニュー、食材、1以上の使用量を入力してください");
       return;
@@ -1653,7 +1674,7 @@ const cancelEdit = () => {
   };
 
   const addOrder = async (customerGroupId: string | null = null) => {
-    const quantity = Number(orderQuantity);
+    const quantity = parseNumberInput(orderQuantity);
     if (!orderMenuId || !Number.isFinite(quantity) || quantity <= 0) {
       setError("メニューと1以上の注文数を入力してください");
       return;
@@ -2898,11 +2919,17 @@ const orderSectionHeaderStyle: React.CSSProperties = {
             onClick={async () => {
               try {
                 setError(null);
+                const par = normalizeNumberInput(newPar);
+                const parLevel = par === "" ? null : parseNumberInput(newPar);
+                if (par !== "" && !Number.isFinite(parLevel)) {
+                  setError("基準在庫は数値か空欄にしてください");
+                  return;
+                }
                 await createItem({
                   name: newName.trim(),
                   unit: newUnit.trim(),
                   category: newCategory.trim() || null,
-                  par_level: newPar.trim() === "" ? null : Number(newPar),
+                  par_level: parLevel,
                 });
                 setNewName("");
                 setNewUnit("");
@@ -2986,6 +3013,7 @@ const orderSectionHeaderStyle: React.CSSProperties = {
         </section>
 
       <div
+        className="inventory-controls"
         style={{
           display: "flex",
           justifyContent: "space-between",
@@ -3004,7 +3032,7 @@ const orderSectionHeaderStyle: React.CSSProperties = {
           低在庫のみ
         </label>
 
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div className="inventory-bulk-actions" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button onClick={() => moveSelectedQuantities(1, "仕入れ")} disabled={loading}>
             まとめて仕入れ
           </button>
@@ -3048,42 +3076,50 @@ const orderSectionHeaderStyle: React.CSSProperties = {
           <tr>
             <td style={tdStyle}>
               {editingId === item.id ? (
-                <>
-                  <input
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    placeholder="商品名"
-                    style={{ marginRight: 8 }}
-                  />
+                <div className="inventory-edit-fields">
+                  <label>
+                    商品名
+                    <input
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      placeholder="例：醤油"
+                    />
+                  </label>
 
-                  <input
-                    value={editUnit}
-                    onChange={(e) => setEditUnit(e.target.value)}
-                    placeholder="単位（例：個）"
-                    style={{ width: 90, marginRight: 8 }}
-                  />
+                  <label>
+                    単位
+                    <input
+                      value={editUnit}
+                      onChange={(e) => setEditUnit(e.target.value)}
+                      placeholder="例：本・個・g"
+                    />
+                  </label>
 
-                  <input
-                    value={editCategory}
-                    onChange={(e) => setEditCategory(e.target.value)}
-                    placeholder="カテゴリ"
-                    style={{ width: 120, marginRight: 8 }}
-                  />
+                  <label>
+                    カテゴリ
+                    <input
+                      value={editCategory}
+                      onChange={(e) => setEditCategory(e.target.value)}
+                      placeholder="例：調味料"
+                    />
+                  </label>
 
-                  <input
-                    value={editPar}
-                    onChange={(e) => setEditPar(e.target.value)}
-                    placeholder="par_level（空でなし）"
-                    inputMode="decimal"
-                    style={{ width: 140, marginRight: 8 }}
-                  />
-                </>
+                  <label>
+                    在庫基準
+                    <input
+                      value={editPar}
+                      onChange={(e) => setEditPar(e.target.value)}
+                      placeholder="空欄でも可"
+                      inputMode="decimal"
+                    />
+                  </label>
+                </div>
               ) : (
                 <>
                   <b>{item.name}</b>（{item.unit}）
                   {low && (
                     <span style={{ color: "red", marginLeft: 8 }}>
-                      ⚠ 在庫不足（基準 {item.par_level}）
+                      在庫基準 {item.par_level}
                     </span>
                   )}
                 </>
@@ -3092,7 +3128,7 @@ const orderSectionHeaderStyle: React.CSSProperties = {
 
             <td style={tdStyle}>{item.category || "未分類"}</td>
 
-            <td style={tdStyle}>
+            <td className="inventory-actions-cell" style={tdStyle}>
               <strong style={{ color: getStockColor(item.current_stock, item.par_level) }}>
                 {getDisplayStock(item.current_stock)}
               </strong>
@@ -3113,8 +3149,8 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                           return;
                         }
 
-                        const par = editPar.trim();
-                        const parLevel = par === "" ? null : Number(par);
+                        const par = normalizeNumberInput(editPar);
+                        const parLevel = par === "" ? null : parseNumberInput(editPar);
                         if (par !== "" && !Number.isFinite(parLevel)) {
                           setError("par_level は数値か空欄にしてください");
                           return;
@@ -3150,7 +3186,7 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                 <>
                   <input
                     inputMode="decimal"
-                    value={qtyById[item.id] ?? "0"}
+                    value={qtyById[item.id] ?? ""}
                     onChange={(e) =>
                       setQtyById((prev) => ({
                         ...prev,

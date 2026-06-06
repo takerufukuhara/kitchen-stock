@@ -92,7 +92,48 @@ button:disabled {
 }
 
 .inventory-table-scroll table {
-  min-width: 860px;
+  min-width: 1180px;
+}
+
+.inventory-actions-cell {
+  white-space: nowrap;
+}
+
+.inventory-actions-cell input {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.inventory-actions-cell button {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.inventory-edit-fields {
+  display: grid;
+  grid-template-columns: minmax(160px, 1.4fr) minmax(90px, 0.8fr) minmax(120px, 1fr) minmax(120px, 1fr);
+  gap: 8px;
+}
+
+.inventory-edit-fields label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.inventory-edit-fields input {
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 8px;
+  border: 1px solid #9ca3af;
+  border-radius: 6px;
+}
+
+.admin-shell,
+.customer-shell,
+.login-shell {
+  max-width: calc(100vw - 32px);
 }
 
 @media (max-width: 760px) {
@@ -111,6 +152,21 @@ button:disabled {
   .login-shell {
     padding: 14px !important;
     border-radius: 8px !important;
+    max-width: 100%;
+  }
+
+  .customer-shell section,
+  .admin-shell section {
+    padding: 12px !important;
+  }
+
+  .customer-shell input,
+  .customer-shell select,
+  .admin-shell input,
+  .admin-shell select,
+  .login-shell input {
+    width: 100%;
+    max-width: 100%;
   }
 
   .admin-header {
@@ -125,6 +181,40 @@ button:disabled {
 
   .admin-nav button {
     width: 100%;
+  }
+
+  .customer-action-bar,
+  .inventory-controls {
+    align-items: stretch !important;
+    flex-direction: column;
+  }
+
+  .customer-action-bar > section {
+    flex: 1 1 auto !important;
+  }
+
+  .customer-start-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+    width: 100%;
+  }
+
+  .inventory-bulk-actions {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .inventory-bulk-actions button {
+    width: 100%;
+  }
+
+  .inventory-edit-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .order-table-grid button,
+  .admin-shell section button {
+    max-width: 100%;
   }
 
   .admin-two-column,
@@ -150,5 +240,9 @@ button:disabled {
   .admin-shell,
   .login-shell {
     padding: 12px !important;
+  }
+
+  .inventory-bulk-actions {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
