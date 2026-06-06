@@ -1317,6 +1317,13 @@ const cancelEdit = () => {
     (group) => group.category === openRecipeCategory
   );
 
+  const getDisplayStock = (stock: number) => Math.max(0, stock);
+
+  const formatStockQuantity = (stock: number) =>
+    Number.isInteger(getDisplayStock(stock))
+      ? String(getDisplayStock(stock))
+      : getDisplayStock(stock).toFixed(2).replace(/\.?0+$/, "");
+
   const categorySummaries = categories
     .map((category) => {
       const categoryItems = items.filter(
@@ -1369,11 +1376,18 @@ const cancelEdit = () => {
   const orderListText = orderListByCategory
     .map((group) => {
       const lines = group.items.map(
-        (item) => `- ${item.name}: ${item.shortage}${item.unit}`
+        (item) => `- ${item.name}: ${formatStockQuantity(item.shortage)}${item.unit}`
       );
       return [`【${group.category}】`, ...lines].join("\n");
     })
     .join("\n\n");
+
+  const getOrderListCategoryText = (group: (typeof orderListByCategory)[number]) => {
+    const lines = group.items.map(
+      (item) => `- ${item.name}: ${formatStockQuantity(item.shortage)}${item.unit}`
+    );
+    return [`【${group.category}】`, ...lines].join("\n");
+  };
 
   const copyOrderList = async () => {
     if (!orderListText) return;
@@ -1381,6 +1395,19 @@ const cancelEdit = () => {
     try {
       await navigator.clipboard.writeText(`発注リスト\n${orderListText}`);
       setCopyMessage("発注リストをコピーしました");
+    } catch (e) {
+      setCopyMessage("コピーに失敗しました");
+    }
+  };
+
+  const copyOrderListCategory = async (
+    group: (typeof orderListByCategory)[number]
+  ) => {
+    try {
+      await navigator.clipboard.writeText(
+        `発注リスト\n${getOrderListCategoryText(group)}`
+      );
+      setCopyMessage(`${group.category}の発注リストをコピーしました`);
     } catch (e) {
       setCopyMessage("コピーに失敗しました");
     }
@@ -1564,8 +1591,6 @@ const cancelEdit = () => {
       { unavailable: 0, low: 0 }
     );
   };
-
-  const getDisplayStock = (stock: number) => Math.max(0, stock);
 
   const getStockColor = (stock: number, parLevel: number | null) => {
     const displayStock = getDisplayStock(stock);
@@ -2004,7 +2029,6 @@ const orderSectionHeaderStyle: React.CSSProperties = {
           }}
         >
           <h2 style={{ margin: "0 0 8px" }}>発注管理</h2>
-          <h3 style={{ margin: "0 0 8px", fontSize: 16 }}>低在庫アラート</h3>
 
           {lowStockItems.length === 0 ? (
             <p style={{ margin: 0 }}>基準在庫を下回っている商品はありません</p>
@@ -2042,15 +2066,28 @@ const orderSectionHeaderStyle: React.CSSProperties = {
             <>
               {orderListByCategory.map((group) => (
                 <div key={group.category} style={{ marginTop: 12 }}>
-                  <h4 style={{ margin: "0 0 6px", fontSize: 15 }}>
-                    {group.category}
-                  </h4>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 8,
+                      alignItems: "center",
+                      marginBottom: 6,
+                    }}
+                  >
+                    <h4 style={{ margin: 0, fontSize: 15 }}>
+                      {group.category}
+                    </h4>
+                    <button onClick={() => copyOrderListCategory(group)}>
+                      コピー
+                    </button>
+                  </div>
                   <ul style={{ margin: 0, paddingLeft: 20 }}>
                     {group.items.map((item) => (
                       <li key={item.id} style={{ marginBottom: 6 }}>
                         {item.name}:{" "}
                         <strong style={{ color: "#dc2626" }}>
-                          {item.shortage}
+                          {formatStockQuantity(item.shortage)}
                         </strong>
                         {item.unit} 発注
                       </li>
@@ -2736,7 +2773,7 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                           <ul style={{ margin: 0, paddingLeft: 20 }}>
                             {availability.ingredients.map((ingredient) => (
                               <li key={ingredient.itemId} style={{ marginBottom: 4 }}>
-                                {ingredient.name}: 在庫 {ingredient.currentStock}
+                                {ingredient.name}: 在庫 {formatStockQuantity(ingredient.currentStock)}
                                 {ingredient.unit} / 1件 {ingredient.requiredQty}
                                 {ingredient.unit}
                               </li>
@@ -3130,7 +3167,7 @@ const orderSectionHeaderStyle: React.CSSProperties = {
 
             <td className="inventory-actions-cell" style={tdStyle}>
               <strong style={{ color: getStockColor(item.current_stock, item.par_level) }}>
-                {getDisplayStock(item.current_stock)}
+                {formatStockQuantity(item.current_stock)}
               </strong>
             </td>
 
