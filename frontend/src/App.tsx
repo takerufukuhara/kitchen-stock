@@ -56,6 +56,9 @@ const normalizeNumberInput = (value: string) =>
 
 const parseNumberInput = (value: string) => Number(normalizeNumberInput(value));
 
+const normalizeItemNameInput = (value: string) =>
+  value.replace(/\s+/g, "").replace(/　+/g, "").trim();
+
 export default function App() {
   const path = window.location.pathname.replace(/\/+$/, "") || "/";
 
@@ -1022,6 +1025,7 @@ function AdminApp({ onLogout }: { onLogout: () => void }) {
   const [openRecipeCategory, setOpenRecipeCategory] = useState<string | null>(null);
   const [openPrepCategory, setOpenPrepCategory] = useState<string | null>(null);
   const [expandedPrepMenuId, setExpandedPrepMenuId] = useState<string | null>(null);
+  const [prepQuantityByMenuId, setPrepQuantityByMenuId] = useState<Record<string, string>>({});
   const [editingMenuId, setEditingMenuId] = useState<string | null>(null);
   const [editingMenuName, setEditingMenuName] = useState("");
   const [editingMenuCategory, setEditingMenuCategory] = useState("");
@@ -1682,9 +1686,16 @@ const cancelEdit = () => {
   const addRecipeItem = async () => {
     const quantity = parseNumberInput(recipeQuantity);
     const inputName = recipeItemInput.trim();
+    const normalizedInputName = normalizeItemNameInput(inputName);
     const selectedItem =
-      items.find((item) => item.id === recipeItemId && item.name === inputName) ??
-      items.find((item) => item.name === inputName);
+      items.find(
+        (item) =>
+          item.id === recipeItemId &&
+          normalizeItemNameInput(item.name) === normalizedInputName
+      ) ??
+      items.find(
+        (item) => normalizeItemNameInput(item.name) === normalizedInputName
+      );
 
     if (!recipeMenuId) {
       setError("メニューを選択してください");
@@ -1768,6 +1779,52 @@ const cancelEdit = () => {
       await loadOrderData();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const recordPrep = async (menu: MenuItem) => {
+    const quantity = parseNumberInput(prepQuantityByMenuId[menu.id] ?? "");
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      setError("仕込み数は1以上の数値を入力してください");
+      return;
+    }
+    if (menu.recipes.length === 0) {
+      setError("レシピ未登録のメニューは仕込み記録できません");
+      return;
+    }
+
+    const lines = menu.recipes.map((recipe) => {
+      const itemName = getJoinedName(recipe.items) || "食材";
+      return `・${itemName}: ${formatStockQuantity(Number(recipe.quantity) * quantity)}`;
+    });
+
+    if (
+      !confirm(
+        `「${menu.name}」を${formatStockQuantity(quantity)}件分仕込みますか？\n\n使用する食材:\n${lines.join("\n")}`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
+      await Promise.all(
+        menu.recipes.map((recipe) =>
+          createStockMovement({
+            item_id: recipe.item_id,
+            delta: -Number(recipe.quantity) * quantity,
+            reason: `仕込み:${menu.name}`,
+          })
+        )
+      );
+      setPrepQuantityByMenuId((prev) => ({ ...prev, [menu.id]: "" }));
+      await loadItems();
+      await loadOrderData();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -2089,6 +2146,12 @@ const orderSectionHeaderStyle: React.CSSProperties = {
           注文管理
         </button>
       </nav>
+
+      {error && (
+        <p style={{ color: "red", whiteSpace: "pre-wrap" }}>
+          エラー: {error}
+        </p>
+      )}
 
       {activeTab === "low-stock" && (
       <>
@@ -2612,7 +2675,11 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                 value={recipeItemInput}
                 onChange={(e) => {
                   const value = e.target.value;
-                  const matchedItem = items.find((item) => item.name === value);
+                  const normalizedValue = normalizeItemNameInput(value);
+                  const matchedItem = items.find(
+                    (item) => normalizeItemNameInput(item.name) === normalizedValue
+                  );
+                  setError(null);
                   setRecipeItemInput(value);
                   setRecipeItemId(matchedItem?.id ?? "");
                 }}
@@ -3070,6 +3137,7 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                               {availability.ingredients.length === 0 ? (
                                 <p style={{ margin: 0 }}>レシピ未登録</p>
                               ) : (
+                                <>
                                 <ul style={{ margin: 0, paddingLeft: 20 }}>
                                   {availability.ingredients.map((ingredient) => (
                                     <li key={ingredient.itemId} style={{ marginBottom: 4 }}>
@@ -3081,6 +3149,35 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                                     </li>
                                   ))}
                                 </ul>
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    gap: 8,
+                                    flexWrap: "wrap",
+                                    alignItems: "center",
+                                    marginTop: 10,
+                                  }}
+                                >
+                                  <input
+                                    inputMode="decimal"
+                                    placeholder="仕込み数"
+                                    value={prepQuantityByMenuId[menu.id] ?? ""}
+                                    onChange={(e) =>
+                                      setPrepQuantityByMenuId((prev) => ({
+                                        ...prev,
+                                        [menu.id]: e.target.value,
+                                      }))
+                                    }
+                                    style={{ ...inputStyle, width: 120 }}
+                                  />
+                                  <button
+                                    onClick={() => recordPrep(menu)}
+                                    disabled={loading}
+                                  >
+                                    仕込み記録
+                                  </button>
+                                </div>
+                                </>
                               )}
                             </div>
                           )}
@@ -3329,11 +3426,6 @@ const orderSectionHeaderStyle: React.CSSProperties = {
       )}
 
       {loading && <p>読み込み中...</p>}
-      {error && (
-        <p style={{ color: "red", whiteSpace: "pre-wrap" }}>
-          エラー: {error}
-        </p>
-      )}
 
       <div className="inventory-table-scroll">
       <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 20 }}>

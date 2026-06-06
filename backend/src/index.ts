@@ -724,7 +724,7 @@ app.patch("/orders/:id/confirm-cancel", requireAdmin, async (req, res) => {
 
     const { data: order, error: orderError } = await supabase
       .from("orders")
-      .select("id,menu_item_id,quantity,status,menu_items(name)")
+      .select("id,menu_item_id,quantity,status,menu_items(name,prep_required)")
       .eq("id", orderId)
       .single();
 
@@ -812,33 +812,37 @@ app.patch("/orders/:id/start-cooking", requireAdmin, async (req, res) => {
       return res.status(400).json({ error: "調理待ちの注文だけ調理開始できます" });
     }
 
-    const { data: recipes, error: recipesError } = await supabase
-      .from("recipes")
-      .select("item_id,quantity")
-      .eq("menu_item_id", order.menu_item_id);
+    const joinedMenu = Array.isArray(order.menu_items)
+      ? order.menu_items[0]
+      : (order.menu_items as any);
+    const menuName = joinedMenu?.name;
+    const prepRequired = Boolean(joinedMenu?.prep_required);
 
-    if (recipesError) {
-      return res.status(500).json({ error: recipesError.message });
+    if (!prepRequired) {
+      const { data: recipes, error: recipesError } = await supabase
+        .from("recipes")
+        .select("item_id,quantity")
+        .eq("menu_item_id", order.menu_item_id);
+
+      if (recipesError) {
+        return res.status(500).json({ error: recipesError.message });
+      }
+      if (!recipes || recipes.length === 0) {
+        return res.status(400).json({ error: "このメニューにはレシピが登録されていません" });
+      }
+
+      const movements = recipes.map((recipe) => ({
+        item_id: recipe.item_id,
+        delta: -Number(recipe.quantity) * Number(order.quantity),
+        reason: `注文使用:${menuName ?? "メニュー"}`,
+      }));
+
+      const { error: insertError } = await supabase
+        .from("stock_movements")
+        .insert(movements);
+
+      if (insertError) return res.status(500).json({ error: insertError.message });
     }
-    if (!recipes || recipes.length === 0) {
-      return res.status(400).json({ error: "このメニューにはレシピが登録されていません" });
-    }
-
-    const menuName = Array.isArray(order.menu_items)
-      ? order.menu_items[0]?.name
-      : (order.menu_items as any)?.name;
-
-    const movements = recipes.map((recipe) => ({
-      item_id: recipe.item_id,
-      delta: -Number(recipe.quantity) * Number(order.quantity),
-      reason: `注文使用:${menuName ?? "メニュー"}`,
-    }));
-
-    const { error: insertError } = await supabase
-      .from("stock_movements")
-      .insert(movements);
-
-    if (insertError) return res.status(500).json({ error: insertError.message });
 
     const { data, error } = await supabase
       .from("orders")
