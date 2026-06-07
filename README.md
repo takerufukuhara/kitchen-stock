@@ -1,5 +1,11 @@
 # Kitchen Stock
 
+## デモURL
+
+- お客様画面: https://kitchen-stock-frontend-rho.vercel.app
+- 管理画面: https://kitchen-stock-frontend-rho.vercel.app/admin
+- パスワード: demo1234
+
 飲食店の在庫管理、発注判断、廃棄分析、注文受付、仕込み管理をまとめて行うためのWebアプリです。  
 飲食店で社員として働いた経験をもとに、「在庫数の確認」「発注漏れ」「廃棄の振り返り」「注文と在庫の連動」が手作業になりやすい課題を想定して作成しました。
 
@@ -207,8 +213,5 @@ http://localhost:5173
 
 - バックエンド: Render
 - フロントエンド: Vercel
-- デプロイ方法: 手動デプロイ
-
-無料枠の使用制限を考慮し、GitHubへpushするたびに自動デプロイされる設定ではなく、必要なタイミングで手動デプロイする運用にしています。
 
 `.env`ファイルには秘密情報が含まれるため、GitHubには公開しません。
