@@ -43,7 +43,9 @@ export type WasteSummary = {
 };
 
 export async function fetchStockMovements(params: {
-  item_id: string;
+  item_id?: string;
+  since?: string;
+  until?: string;
   limit?: number;
 }): Promise<StockMovement[]> {
   const API = import.meta.env.VITE_API_URL?.replace(/\/+$/, "");
@@ -51,7 +53,9 @@ export async function fetchStockMovements(params: {
 
   const limit = params.limit ?? 50;
   const url = new URL(`${API}/stock-movements`);
-  url.searchParams.set("item_id", params.item_id);
+  if (params.item_id) url.searchParams.set("item_id", params.item_id);
+  if (params.since) url.searchParams.set("since", params.since);
+  if (params.until) url.searchParams.set("until", params.until);
   url.searchParams.set("limit", String(limit));
 
   const res = await fetch(url.toString(), {

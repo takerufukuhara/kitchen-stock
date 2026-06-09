@@ -57,6 +57,7 @@ export type CustomerGroup = {
   label: string | null;
   created_at: string;
   closed_at: string | null;
+  checkout_requested_at: string | null;
 };
 
 export type CustomerGroupOption = {
@@ -191,6 +192,12 @@ export async function checkoutCustomerGroup(id: string): Promise<CustomerGroup> 
   return request<CustomerGroup>(`/customer-groups/${id}/checkout`, {
     method: "PATCH",
     headers: adminHeaders(),
+  });
+}
+
+export async function requestCustomerGroupCheckout(id: string): Promise<CustomerGroup> {
+  return request<CustomerGroup>(`/customer-groups/${id}/request-checkout`, {
+    method: "PATCH",
   });
 }
 

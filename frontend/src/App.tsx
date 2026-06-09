@@ -1028,6 +1028,7 @@ function AdminApp({ onLogout }: { onLogout: () => void }) {
   const [openHistoryItemId, setOpenHistoryItemId] = useState<string | null>(null);
   const [history, setHistory] = useState<StockMovement[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [dailyStockMovements, setDailyStockMovements] = useState<StockMovement[]>([]);
   const [wasteSummaries, setWasteSummaries] = useState<WasteSummary[]>([]);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -1065,7 +1066,7 @@ const [editPar, setEditPar] = useState<string>(""); // 入力欄は文字列で�
 const [categoryFilter, setCategoryFilter] = useState("");
 const [onlyLow, setOnlyLow] = useState(false);
 const [activeTab, setActiveTab] = useState<
-  "inventory" | "low-stock" | "waste" | "menu" | "prep" | "orders"
+  "inventory" | "low-stock" | "waste" | "menu" | "prep" | "orders" | "closing"
 >("inventory");
 
 
@@ -1168,6 +1169,47 @@ const cancelEdit = () => {
       setOrders([]);
       setStaffCalls([]);
       setCustomerGroupOptions([]);
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getTodayRange = () => {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
+    return {
+      start,
+      end,
+      since: start.toISOString(),
+      until: end.toISOString(),
+    };
+  };
+
+  const loadClosingCheckData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const { since, until } = getTodayRange();
+      const [itemData, menuData, orderData, staffCallData, customerGroupData, stockMovementData] =
+        await Promise.all([
+          fetchItems(),
+          fetchMenuItems(),
+          fetchOrders(),
+          fetchStaffCalls(),
+          fetchCustomerGroupOptions(),
+          fetchStockMovements({ since, until, limit: 200 }),
+        ]);
+      setItems(itemData);
+      setMenuItems(menuData);
+      setOrders(orderData);
+      setStaffCalls(staffCallData);
+      setCustomerGroupOptions(customerGroupData);
+      setDailyStockMovements(stockMovementData);
+    } catch (e) {
+      setDailyStockMovements([]);
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
@@ -1298,6 +1340,9 @@ const cancelEdit = () => {
     }
     if (activeTab === "orders" || activeTab === "menu" || activeTab === "prep") {
       loadOrderData();
+    }
+    if (activeTab === "closing") {
+      loadClosingCheckData();
     }
     if (activeTab === "orders") {
       const intervalId = window.setInterval(loadOrderData, 5000);
@@ -1565,6 +1610,40 @@ const cancelEdit = () => {
     setOpenOrderSections((prev) => ({ ...prev, [key]: !prev[key] }));
   };
   const itemsById = new Map(items.map((item) => [item.id, item]));
+  const todayRange = getTodayRange();
+  const isTodayDate = (value: string | null) => {
+    if (!value) return false;
+    const time = new Date(value).getTime();
+    return time >= todayRange.start.getTime() && time < todayRange.end.getTime();
+  };
+  const todayOrders = orders.filter((order) => isTodayDate(order.created_at));
+  const todayCompletedOrders = todayOrders.filter((order) => order.status === "完了");
+  const todayActiveOrders = todayOrders.filter(
+    (order) => order.status === "調理待ち" || order.status === "調理中"
+  );
+  const todayCanceledOrders = todayOrders.filter((order) => order.status === "キャンセル");
+  const getStockMovementCategory = (movement: StockMovement) => {
+    const reason = movement.reason ?? "";
+
+    if (reason === "仕入れ") return "仕入れ";
+    if (reason === "廃棄") return "廃棄";
+    if (reason === "棚卸し修正") return "在庫修正";
+    if (reason === "使用" || reason.startsWith("注文使用:") || reason.startsWith("仕込み:")) {
+      return "使用";
+    }
+    return movement.delta >= 0 ? "仕入れ" : "使用";
+  };
+  const closingMovementCategories = ["仕入れ", "使用", "廃棄", "在庫修正"];
+  const closingMovementSummary = closingMovementCategories.map((category) => {
+    const movements = dailyStockMovements.filter(
+      (movement) => getStockMovementCategory(movement) === category
+    );
+    return {
+      category,
+      count: movements.length,
+      movements,
+    };
+  });
 
   const formatOrderDate = (value: string | null) =>
     value ? new Date(value).toLocaleString() : "";
@@ -2173,6 +2252,12 @@ const orderSectionHeaderStyle: React.CSSProperties = {
         >
           注文管理
         </button>
+        <button
+          onClick={() => setActiveTab("closing")}
+          style={tabButtonStyle(activeTab === "closing")}
+        >
+          閉店チェック
+        </button>
       </nav>
 
       {error && (
@@ -2626,9 +2711,164 @@ const orderSectionHeaderStyle: React.CSSProperties = {
       </section>
       )}
 
+      {activeTab === "closing" && (
+        <section style={sectionStyle}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 12,
+              alignItems: "center",
+              flexWrap: "wrap",
+              marginBottom: 12,
+            }}
+          >
+            <div>
+              <h2 style={{ margin: "0 0 4px" }}>閉店チェック</h2>
+              <p style={{ margin: 0, color: "#4b5563" }}>
+                今日の注文と在庫変動を確認します。
+              </p>
+            </div>
+            <button onClick={loadClosingCheckData} disabled={loading}>
+              更新
+            </button>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+              gap: 10,
+              marginBottom: 16,
+            }}
+          >
+            {[
+              ["今日の注文", todayOrders.length],
+              ["完了", todayCompletedOrders.length],
+              ["調理中・待ち", todayActiveOrders.length],
+              ["キャンセル", todayCanceledOrders.length],
+            ].map(([label, value]) => (
+              <div
+                key={label}
+                style={{
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 8,
+                  padding: 12,
+                  background: "#fff",
+                }}
+              >
+                <p style={{ margin: "0 0 6px", color: "#4b5563", fontSize: 14 }}>
+                  {label}
+                </p>
+                <strong style={{ fontSize: 24 }}>{value}</strong>
+              </div>
+            ))}
+          </div>
+
+          <div
+            className="admin-two-column"
+            style={{
+              display: "grid",
+              gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
+              gap: 16,
+              alignItems: "start",
+            }}
+          >
+            <section
+              style={{
+                border: "1px solid #e5e7eb",
+                borderRadius: 8,
+                padding: 12,
+                background: "#fff",
+              }}
+            >
+              <h3 style={{ margin: "0 0 10px" }}>今日の注文一覧</h3>
+              {todayOrders.length === 0 ? (
+                <p style={{ margin: 0, color: "#6b7280" }}>今日の注文はありません</p>
+              ) : (
+                <div style={{ display: "grid", gap: 8 }}>
+                  {todayOrders.map((order) => (
+                    <div
+                      key={order.id}
+                      style={{
+                        border: "1px solid #f3f4f6",
+                        borderRadius: 6,
+                        padding: 8,
+                      }}
+                    >
+                      <strong>{getJoinedName(order.menu_items) || "メニュー不明"}</strong>
+                      <p style={{ margin: "4px 0 0", color: "#4b5563" }}>
+                        {formatStockQuantity(order.quantity)}件 / {order.status} /{" "}
+                        {(Array.isArray(order.customer_groups)
+                          ? order.customer_groups[0]?.label
+                          : order.customer_groups?.label) || "卓なし"} /{" "}
+                        {formatOrderTime(order.created_at)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section
+              style={{
+                border: "1px solid #e5e7eb",
+                borderRadius: 8,
+                padding: 12,
+                background: "#fff",
+              }}
+            >
+              <h3 style={{ margin: "0 0 10px" }}>今日の在庫変動</h3>
+              {dailyStockMovements.length === 0 ? (
+                <p style={{ margin: 0, color: "#6b7280" }}>今日の在庫変動はありません</p>
+              ) : (
+                <div style={{ display: "grid", gap: 12 }}>
+                  {closingMovementSummary.map((group) => (
+                    <div key={group.category}>
+                      <h4 style={{ margin: "0 0 6px" }}>
+                        {group.category} {group.count}件
+                      </h4>
+                      {group.movements.length === 0 ? (
+                        <p style={{ margin: 0, color: "#6b7280", fontSize: 14 }}>
+                          記録なし
+                        </p>
+                      ) : (
+                        <div style={{ display: "grid", gap: 6 }}>
+                          {group.movements.map((movement) => {
+                            const item = itemsById.get(movement.item_id);
+                            return (
+                              <div
+                                key={movement.id}
+                                style={{
+                                  border: "1px solid #f3f4f6",
+                                  borderRadius: 6,
+                                  padding: 8,
+                                }}
+                              >
+                                <strong>{item?.name ?? "商品不明"}</strong>
+                                <p style={{ margin: "4px 0 0", color: "#4b5563" }}>
+                                  {movement.delta >= 0 ? "+" : "-"}
+                                  {formatStockQuantity(Math.abs(movement.delta))}
+                                  {item?.unit ?? ""} / {movement.reason ?? group.category} /{" "}
+                                  {formatOrderTime(movement.created_at)}
+                                </p>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
+        </section>
+      )}
+
       {activeTab === "menu" && (
-      <section style={sectionStyle}>
-        <h2 style={{ margin: "0 0 12px" }}>メニュー管理</h2>
+        <section style={sectionStyle}>
+          <h2 style={{ margin: "0 0 12px" }}>メニュー管理</h2>
         <div>
           <button
             type="button"

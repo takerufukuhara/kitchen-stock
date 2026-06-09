@@ -163,23 +163,26 @@ app.post("/items", requireAdmin, async (req, res) => {
 app.get("/stock-movements", requireAdmin, async (req, res) => {
   try {
     const itemId = req.query.item_id as string | undefined;
+    const since = req.query.since as string | undefined;
+    const until = req.query.until as string | undefined;
     const limitStr = req.query.limit as string | undefined;
     const limit = limitStr ? Number(limitStr) : 50;
 
-    if (!itemId) {
-      return res.status(400).json({ error: "item_id は必須です" });
-    }
     if (!Number.isFinite(limit) || limit <= 0 || limit > 200) {
       return res.status(400).json({ error: "limit は 1〜200 の数値にしてください" });
     }
 
-    // stock_movements の列はあなたのDBに合わせて必要なものだけselect
-    const { data, error } = await supabase
+    let query = supabase
       .from("stock_movements")
       .select("id,item_id,delta,reason,created_at")
-      .eq("item_id", itemId)
       .order("created_at", { ascending: false })
       .limit(limit);
+
+    if (itemId) query = query.eq("item_id", itemId);
+    if (since) query = query.gte("created_at", since);
+    if (until) query = query.lt("created_at", until);
+
+    const { data, error } = await query;
 
     if (error) return res.status(500).json({ error: error.message });
 
@@ -527,7 +530,7 @@ app.get("/customer-groups", async (_req, res) => {
   try {
     const { data, error } = await supabase
       .from("customer_groups")
-      .select("id,label,created_at,closed_at")
+      .select("id,label,created_at,closed_at,checkout_requested_at")
       .in("label", customerGroupLabels)
       .is("closed_at", null)
       .order("created_at", { ascending: false });
@@ -560,7 +563,7 @@ app.post("/customer-groups", async (req, res) => {
 
     const { data: activeGroup, error: activeGroupError } = await supabase
       .from("customer_groups")
-      .select("id,label,created_at,closed_at")
+      .select("id,label,created_at,closed_at,checkout_requested_at")
       .eq("label", label)
       .is("closed_at", null)
       .maybeSingle();
@@ -573,7 +576,7 @@ app.post("/customer-groups", async (req, res) => {
     const { data, error } = await supabase
       .from("customer_groups")
       .insert([{ label }])
-      .select("id,label,created_at,closed_at")
+      .select("id,label,created_at,closed_at,checkout_requested_at")
       .single();
 
     if (error) return res.status(500).json({ error: error.message });
@@ -589,10 +592,28 @@ app.patch("/customer-groups/:id/checkout", requireAdmin, async (req, res) => {
       .from("customer_groups")
       .update({ closed_at: new Date().toISOString() })
       .eq("id", req.params.id)
-      .select("id,label,created_at,closed_at")
+      .select("id,label,created_at,closed_at,checkout_requested_at")
       .single();
 
     if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.patch("/customer-groups/:id/request-checkout", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("customer_groups")
+      .update({ checkout_requested_at: new Date().toISOString() })
+      .eq("id", req.params.id)
+      .is("closed_at", null)
+      .select("id,label,created_at,closed_at,checkout_requested_at")
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    if (!data) return res.status(404).json({ error: "お客様グループが見つかりません" });
     res.json(data);
   } catch (e) {
     res.status(500).json({ error: String(e) });
@@ -603,7 +624,7 @@ app.get("/customer-groups/:id", async (req, res) => {
   try {
     const { data, error } = await supabase
       .from("customer_groups")
-      .select("id,label,created_at,closed_at")
+      .select("id,label,created_at,closed_at,checkout_requested_at")
       .eq("id", req.params.id)
       .single();
 
