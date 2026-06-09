@@ -1065,6 +1065,7 @@ const [editPar, setEditPar] = useState<string>(""); // 入力欄は文字列で�
 
 const [categoryFilter, setCategoryFilter] = useState("");
 const [onlyLow, setOnlyLow] = useState(false);
+const [stockCorrectionReason, setStockCorrectionReason] = useState("");
 const [activeTab, setActiveTab] = useState<
   "inventory" | "low-stock" | "waste" | "menu" | "prep" | "orders" | "closing"
 >("inventory");
@@ -1216,6 +1217,21 @@ const cancelEdit = () => {
     }
   };
 
+  const stockCorrectionReasonOptions = [
+    "棚卸し差異",
+    "入力ミス修正",
+    "仕入れ記録漏れ",
+    "使用記録漏れ",
+    "廃棄記録漏れ",
+    "その他",
+  ];
+
+  const getStockCorrectionReason = () => {
+    const reason = stockCorrectionReason.trim();
+    if (!reason) return null;
+    return `在庫修正:${reason}`;
+  };
+
   const moveStock = async (itemId: string, delta: number, reason: string) => {
     try {
       setError(null);
@@ -1235,6 +1251,7 @@ const cancelEdit = () => {
     sign: 1 | -1,
     reason: string
   ) => {
+    const item = items.find((current) => current.id === itemId);
     const raw = qtyById[itemId] ?? "";
     const qty = parseNumberInput(raw);
 
@@ -1244,7 +1261,27 @@ const cancelEdit = () => {
       return;
     }
 
-    await moveStock(itemId, sign * qty, reason);
+    const isStockCorrection = reason === "在庫修正";
+    const actualReason = isStockCorrection ? getStockCorrectionReason() : reason;
+    if (!actualReason) {
+      setError("在庫修正理由を選択してください");
+      return;
+    }
+
+    const operationLabel = isStockCorrection
+      ? `在庫修正（${stockCorrectionReason}）`
+      : reason;
+    const unit = item?.unit ?? "";
+
+    if (
+      !confirm(
+        `${operationLabel}を実行しますか？\n\n対象商品:\n・${item?.name ?? "商品不明"}: ${formatStockQuantity(qty)}${unit}`
+      )
+    ) {
+      return;
+    }
+
+    await moveStock(itemId, sign * qty, actualReason);
     setQtyById((prev) => ({ ...prev, [itemId]: "" }));
   };
 
@@ -1261,9 +1298,18 @@ const cancelEdit = () => {
       return;
     }
 
-    const operationLabel = reason === "棚卸し修正" ? "在庫修正" : reason;
+    const isStockCorrection = reason === "在庫修正";
+    const actualReason = isStockCorrection ? getStockCorrectionReason() : reason;
+    if (!actualReason) {
+      setError("在庫修正理由を選択してください");
+      return;
+    }
+
+    const operationLabel = isStockCorrection
+      ? `在庫修正（${stockCorrectionReason}）`
+      : reason;
     const targetLines = movements
-      .map(({ item, qty }) => `・${item.name}: ${qty}${item.unit}`)
+      .map(({ item, qty }) => `・${item.name}: ${formatStockQuantity(qty)}${item.unit}`)
       .join("\n");
 
     if (
@@ -1282,7 +1328,7 @@ const cancelEdit = () => {
           createStockMovement({
             item_id: item.id,
             delta: sign * qty,
-            reason,
+            reason: actualReason,
           })
         )
       );
@@ -1294,7 +1340,7 @@ const cancelEdit = () => {
         return next;
       });
       await loadItems();
-      if (reason === "廃棄") {
+      if (actualReason === "廃棄") {
         await loadWasteData();
       }
     } catch (e) {
@@ -1627,7 +1673,9 @@ const cancelEdit = () => {
 
     if (reason === "仕入れ") return "仕入れ";
     if (reason === "廃棄") return "廃棄";
-    if (reason === "棚卸し修正") return "在庫修正";
+    if (reason === "棚卸し修正" || reason.startsWith("在庫修正:")) {
+      return "在庫修正";
+    }
     if (reason === "使用" || reason.startsWith("注文使用:") || reason.startsWith("仕込み:")) {
       return "使用";
     }
@@ -2933,7 +2981,7 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                       loading || orderUsageDiffs.length === 0 ? "not-allowed" : "pointer",
                   }}
                 >
-                  差分を在庫に反映
+                  差分を補正記録として反映
                 </button>
               </div>
               <p style={{ margin: "0 0 10px", color: "#4b5563", fontSize: 14 }}>
@@ -3838,6 +3886,21 @@ const orderSectionHeaderStyle: React.CSSProperties = {
             />
             在庫基準未満
           </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            在庫修正理由
+            <select
+              value={stockCorrectionReason}
+              onChange={(e) => setStockCorrectionReason(e.target.value)}
+              style={inputStyle}
+            >
+              <option value="">選択してください</option>
+              {stockCorrectionReasonOptions.map((reason) => (
+                <option key={reason} value={reason}>
+                  {reason}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
 
         <div className="inventory-bulk-actions" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -3857,7 +3920,7 @@ const orderSectionHeaderStyle: React.CSSProperties = {
           <button onClick={() => moveSelectedQuantities(-1, "廃棄")} disabled={loading}>
             まとめて廃棄
           </button>
-          <button onClick={() => moveSelectedQuantities(-1, "棚卸し修正")} disabled={loading}>
+          <button onClick={() => moveSelectedQuantities(-1, "在庫修正")} disabled={loading}>
             まとめて在庫修正
           </button>
         </div>
@@ -4087,7 +4150,7 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                   </button>
 
                   <button
-                    onClick={() => moveWithQty(item.id, -1, "棚卸し修正")}
+                    onClick={() => moveWithQty(item.id, -1, "在庫修正")}
                     disabled={loading}
                     style={{ marginRight: 6 }}
                   >
