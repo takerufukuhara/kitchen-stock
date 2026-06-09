@@ -26,6 +26,7 @@ import {
   fetchStaffCall,
   fetchStaffCalls,
   getJoinedName,
+  requestCustomerGroupCheckout,
   startCookingOrder,
   updateMenuItem,
   type CustomerGroup,
@@ -545,10 +546,18 @@ function CustomerOrderPage() {
     }
   };
 
-  const requestCheckout = () => {
-    window.localStorage.setItem(CUSTOMER_CHECKOUT_REQUESTED_KEY, "true");
-    setCheckoutRequested(true);
-    setError(null);
+  const requestCheckout = async () => {
+    if (!customerGroup) return;
+
+    try {
+      setError(null);
+      const group = await requestCustomerGroupCheckout(customerGroup.id);
+      setCustomerGroup(group);
+      window.localStorage.setItem(CUSTOMER_CHECKOUT_REQUESTED_KEY, "true");
+      setCheckoutRequested(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
   };
 
   const selectedGroupOption = customerGroupOptions.find(
@@ -605,7 +614,23 @@ function CustomerOrderPage() {
         }}
       >
         {checkoutRequested && (
-          <h1 style={{ margin: 0, fontSize: 24 }}>本日はありがとうございました。</h1>
+          <section style={{ display: "grid", gap: 12 }}>
+            <h1 style={{ margin: 0, fontSize: 24 }}>本日はありがとうございました。</h1>
+            <p style={{ margin: 0, color: "#4b5563", lineHeight: 1.7 }}>
+              注文開始画面に戻るには、下のボタンを押してください。
+            </p>
+            <button
+              type="button"
+              onClick={resetCustomerSession}
+              style={{
+                ...buttonStyle,
+                width: "fit-content",
+                padding: "8px 14px",
+              }}
+            >
+              注文開始画面に戻る
+            </button>
+          </section>
         )}
         {!checkoutRequested && (
           <>
@@ -1525,7 +1550,10 @@ const cancelEdit = () => {
       staffCalls: groupStaffCalls,
       staffCallOrders: groupStaffCallOrders,
       noticeCount:
-        groupCanceledOrders.length + groupStaffCalls.length + groupStaffCallOrders.length,
+        groupCanceledOrders.length +
+        groupStaffCalls.length +
+        groupStaffCallOrders.length +
+        (group.checkout_requested_at ? 1 : 0),
     };
   });
   const getOrderSectionKey = (groupId: string, section: string) =>
@@ -2291,9 +2319,27 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                     {group.label}
                     {notificationBadge(noticeCount)}
                   </h3>
-                  <button onClick={() => checkoutGroup(group.id)} disabled={loading}>
-                    会計済みにする
-                  </button>
+                  <div style={{ display: "grid", gap: 4, justifyItems: "end" }}>
+                    {group.checkout_requested_at ? (
+                      <span style={{ fontSize: 13, fontWeight: 700, color: "#b45309" }}>
+                        会計希望あり
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: 13, color: "#6b7280" }}>
+                        会計希望なし
+                      </span>
+                    )}
+                    <button
+                      onClick={() => checkoutGroup(group.id)}
+                      disabled={loading || !group.checkout_requested_at}
+                      style={{
+                        opacity: loading || !group.checkout_requested_at ? 0.55 : 1,
+                        cursor: loading || !group.checkout_requested_at ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      会計済みにする
+                    </button>
+                  </div>
                 </div>
 
                 <div style={{ display: "grid", gap: 12 }}>
