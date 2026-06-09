@@ -1644,7 +1644,60 @@ const cancelEdit = () => {
       movements,
     };
   });
+  const menuItemsById = new Map(menuItems.map((menu) => [menu.id, menu]));
+  const completedStockTargetOrders = todayCompletedOrders.filter((order) => {
+    const menu = menuItemsById.get(order.menu_item_id);
+    return menu && !menu.prep_required;
+  });
+  const getActualOrderUsageQty = (orderId: string, itemId: string) =>
+    dailyStockMovements
+      .filter((movement) => {
+        const reason = movement.reason ?? "";
+        return (
+          movement.order_id === orderId &&
+          movement.item_id === itemId &&
+          movement.delta < 0 &&
+          (reason.startsWith("注文使用:") || reason === "閉店チェック補正")
+        );
+      })
+      .reduce((sum, movement) => sum + Math.abs(Number(movement.delta)), 0);
+  const orderUsageDiffs = completedStockTargetOrders
+    .flatMap((order) => {
+      const menu = menuItemsById.get(order.menu_item_id);
+      if (!menu) return [];
 
+      return menu.recipes.map((recipe) => {
+        const expectedQty = Number(recipe.quantity) * Number(order.quantity);
+        const actualQty = getActualOrderUsageQty(order.id, recipe.item_id);
+        const diffQty = Math.max(0, expectedQty - actualQty);
+        const item = itemsById.get(recipe.item_id);
+        return {
+          order,
+          menu,
+          itemId: recipe.item_id,
+          item,
+          expectedQty,
+          actualQty,
+          diffQty,
+        };
+      });
+    })
+    .filter((diff) => diff.diffQty > 0)
+    .sort((a, b) => {
+      const orderDiff =
+        new Date(a.order.created_at).getTime() - new Date(b.order.created_at).getTime();
+      if (orderDiff !== 0) return orderDiff;
+      return (a.item?.name ?? "").localeCompare(b.item?.name ?? "", "ja");
+    });
+  const missingOrderUsageOrders = completedStockTargetOrders.filter((order) => {
+    const menu = menuItemsById.get(order.menu_item_id);
+    if (!menu) return false;
+    return menu.recipes.some((recipe) => {
+      const expectedQty = Number(recipe.quantity) * Number(order.quantity);
+      const actualQty = getActualOrderUsageQty(order.id, recipe.item_id);
+      return expectedQty > 0 && actualQty <= 0;
+    });
+  });
   const formatOrderDate = (value: string | null) =>
     value ? new Date(value).toLocaleString() : "";
 
@@ -1994,6 +2047,46 @@ const cancelEdit = () => {
       await loadOrderData();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const applyClosingUsageDiff = async () => {
+    if (orderUsageDiffs.length === 0) return;
+
+    const targetLines = orderUsageDiffs
+      .map((diff) => {
+        const item = diff.item;
+        return `・${diff.menu.name} / ${item?.name ?? "商品不明"}: ${formatStockQuantity(diff.diffQty)}${item?.unit ?? ""}`;
+      })
+      .join("\n");
+
+    if (
+      !confirm(
+        `未反映の在庫減少を反映しますか？\n\n対象商品:\n${targetLines}`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
+      await Promise.all(
+        orderUsageDiffs.map((diff) =>
+          createStockMovement({
+            item_id: diff.itemId,
+            delta: -diff.diffQty,
+            reason: "閉店チェック補正",
+            order_id: diff.order.id,
+          })
+        )
+      );
+      await loadClosingCheckData();
+      await loadItems();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -2763,6 +2856,121 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                 <strong style={{ fontSize: 24 }}>{value}</strong>
               </div>
             ))}
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+              gap: 12,
+              marginBottom: 16,
+            }}
+          >
+            <section
+              style={{
+                border: "1px solid #e5e7eb",
+                borderRadius: 8,
+                padding: 12,
+                background: "#fff",
+              }}
+            >
+              <h3 style={{ margin: "0 0 8px" }}>注文使用漏れチェック</h3>
+              <p style={{ margin: "0 0 10px", color: "#4b5563", fontSize: 14 }}>
+                完成済み注文のうち、今日の注文使用記録が見つからないものを表示します。
+              </p>
+              {missingOrderUsageOrders.length === 0 ? (
+                <p style={{ margin: 0, color: "#166534", fontWeight: 700 }}>
+                  注文使用漏れの候補はありません
+                </p>
+              ) : (
+                <div style={{ display: "grid", gap: 8 }}>
+                  {missingOrderUsageOrders.map((order) => (
+                    <div
+                      key={order.id}
+                      style={{
+                        border: "1px solid #fee2e2",
+                        borderRadius: 6,
+                        padding: 8,
+                        background: "#fff7f7",
+                      }}
+                    >
+                      <strong>{getJoinedName(order.menu_items) || "メニュー不明"}</strong>
+                      <p style={{ margin: "4px 0 0", color: "#991b1b" }}>
+                        {formatStockQuantity(order.quantity)}件 / 完了:{" "}
+                        {formatOrderTime(order.completed_at ?? order.created_at)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section
+              style={{
+                border: "1px solid #e5e7eb",
+                borderRadius: 8,
+                padding: 12,
+                background: "#fff",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 8,
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                  marginBottom: 8,
+                }}
+              >
+                <h3 style={{ margin: 0 }}>理論使用量との差分</h3>
+                <button
+                  onClick={applyClosingUsageDiff}
+                  disabled={loading || orderUsageDiffs.length === 0}
+                  style={{
+                    opacity: loading || orderUsageDiffs.length === 0 ? 0.55 : 1,
+                    cursor:
+                      loading || orderUsageDiffs.length === 0 ? "not-allowed" : "pointer",
+                  }}
+                >
+                  差分を在庫に反映
+                </button>
+              </div>
+              <p style={{ margin: "0 0 10px", color: "#4b5563", fontSize: 14 }}>
+                レシピから計算した本来の使用量と、注文ごとの在庫使用記録を比較します。
+              </p>
+              {orderUsageDiffs.length === 0 ? (
+                <p style={{ margin: 0, color: "#166534", fontWeight: 700 }}>
+                  未反映の差分はありません
+                </p>
+              ) : (
+                <div style={{ display: "grid", gap: 8 }}>
+                  {orderUsageDiffs.map((diff) => (
+                    <div
+                      key={`${diff.order.id}:${diff.itemId}`}
+                      style={{
+                        border: "1px solid #fed7aa",
+                        borderRadius: 6,
+                        padding: 8,
+                        background: "#fff7ed",
+                      }}
+                    >
+                      <strong>
+                        {diff.menu.name} / {diff.item?.name ?? "商品不明"}
+                      </strong>
+                      <p style={{ margin: "4px 0 0", color: "#9a3412" }}>
+                        注文: {formatOrderTime(diff.order.created_at)} / 本来{" "}
+                        {formatStockQuantity(diff.expectedQty)}
+                        {diff.item?.unit ?? ""} / 実際 {formatStockQuantity(diff.actualQty)}
+                        {diff.item?.unit ?? ""} / 差分{" "}
+                        {formatStockQuantity(diff.diffQty)}
+                        {diff.item?.unit ?? ""}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
           </div>
 
           <div

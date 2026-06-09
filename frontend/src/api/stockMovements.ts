@@ -6,6 +6,7 @@ export async function createStockMovement(params: {
   item_id: string;
   delta: number;
   reason?: string | null;
+  order_id?: string | null;
 }) {
   if (!API) throw new Error("VITE_API_URL が未設定です");
 
@@ -26,6 +27,7 @@ export async function createStockMovement(params: {
 export type StockMovement = {
   id: string;
   item_id: string;
+  order_id: string | null;
   delta: number;
   reason: string | null;
   created_at: string;

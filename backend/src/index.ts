@@ -105,7 +105,7 @@ app.get("/items", requireAdmin, async (_req, res) => {
 
 app.post("/stock-movements", requireAdmin, async (req, res) => {
   try {
-    const { item_id, delta, reason } = req.body;
+    const { item_id, delta, reason, order_id } = req.body;
 
     if (!item_id || delta === undefined || delta === null) {
       return res.status(400).json({ error: "item_id と delta は必須です" });
@@ -114,6 +114,7 @@ app.post("/stock-movements", requireAdmin, async (req, res) => {
     // reason列が無いならここも消してください（後述）
     const payload: any = { item_id, delta };
     if (reason !== undefined) payload.reason = reason;
+    if (order_id !== undefined) payload.order_id = order_id;
 
     const { data, error } = await supabase
       .from("stock_movements")
@@ -174,7 +175,7 @@ app.get("/stock-movements", requireAdmin, async (req, res) => {
 
     let query = supabase
       .from("stock_movements")
-      .select("id,item_id,delta,reason,created_at")
+      .select("id,item_id,delta,reason,order_id,created_at")
       .order("created_at", { ascending: false })
       .limit(limit);
 
@@ -775,7 +776,7 @@ app.patch("/orders/:id/call-staff", async (req, res) => {
 
     const { data: order, error: orderError } = await supabase
       .from("orders")
-      .select("id,menu_item_id,quantity,status,menu_items(name)")
+      .select("id,menu_item_id,quantity,status,menu_items(name,prep_required)")
       .eq("id", orderId)
       .single();
 
@@ -823,7 +824,7 @@ app.patch("/orders/:id/start-cooking", requireAdmin, async (req, res) => {
 
     const { data: order, error: orderError } = await supabase
       .from("orders")
-      .select("id,menu_item_id,quantity,status,menu_items(name)")
+      .select("id,menu_item_id,quantity,status,menu_items(name,prep_required)")
       .eq("id", orderId)
       .single();
 
@@ -856,6 +857,7 @@ app.patch("/orders/:id/start-cooking", requireAdmin, async (req, res) => {
         item_id: recipe.item_id,
         delta: -Number(recipe.quantity) * Number(order.quantity),
         reason: `注文使用:${menuName ?? "メニュー"}`,
+        order_id: order.id,
       }));
 
       const { error: insertError } = await supabase
