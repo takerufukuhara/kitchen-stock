@@ -45,6 +45,7 @@ import {
 const CUSTOMER_ORDER_IDS_KEY = "kitchen-stock-customer-order-ids";
 const CUSTOMER_GROUP_ID_KEY = "kitchen-stock-customer-group-id";
 const CUSTOMER_CHECKOUT_REQUESTED_KEY = "kitchen-stock-checkout-requested";
+const CLOSING_CHECKLIST_KEY_PREFIX = "kitchen-stock-closing-checklist";
 
 const normalizeNumberInput = (value: string) =>
   value
@@ -1034,6 +1035,7 @@ function AdminApp({ onLogout }: { onLogout: () => void }) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [staffCalls, setStaffCalls] = useState<StaffCall[]>([]);
   const [customerGroupOptions, setCustomerGroupOptions] = useState<CustomerGroupOption[]>([]);
+  const [closingChecklist, setClosingChecklist] = useState<Record<string, boolean>>({});
 
   const [newMenuName, setNewMenuName] = useState("");
   const [newMenuCategory, setNewMenuCategory] = useState("");
@@ -1192,6 +1194,33 @@ const cancelEdit = () => {
       since: start.toISOString(),
       until: end.toISOString(),
     };
+  };
+
+  const getClosingChecklistKey = () => {
+    const start = getTodayRange().start;
+    const dateKey = [
+      start.getFullYear(),
+      String(start.getMonth() + 1).padStart(2, "0"),
+      String(start.getDate()).padStart(2, "0"),
+    ].join("-");
+    return `${CLOSING_CHECKLIST_KEY_PREFIX}:${dateKey}`;
+  };
+
+  const loadClosingChecklist = () => {
+    try {
+      const raw = window.localStorage.getItem(getClosingChecklistKey());
+      setClosingChecklist(raw ? JSON.parse(raw) : {});
+    } catch {
+      setClosingChecklist({});
+    }
+  };
+
+  const updateClosingChecklist = (key: string, checked: boolean) => {
+    setClosingChecklist((prev) => {
+      const next = { ...prev, [key]: checked };
+      window.localStorage.setItem(getClosingChecklistKey(), JSON.stringify(next));
+      return next;
+    });
   };
 
   const loadClosingCheckData = async () => {
@@ -1436,6 +1465,7 @@ const cancelEdit = () => {
     }
     if (activeTab === "closing") {
       loadClosingCheckData();
+      loadClosingChecklist();
     }
     if (activeTab === "orders") {
       const intervalId = window.setInterval(loadOrderData, 5000);
@@ -1793,6 +1823,50 @@ const cancelEdit = () => {
       return expectedQty > 0 && actualQty <= 0;
     });
   });
+  const closingChecklistItems = [
+    {
+      key: "open-orders",
+      label: "調理中・待ちの注文が残っていないか確認",
+      warning: todayActiveOrders.length > 0 ? `${todayActiveOrders.length}件残っています` : null,
+    },
+    {
+      key: "missing-usage",
+      label: "注文使用漏れチェックを確認",
+      warning:
+        missingOrderUsageOrders.length > 0
+          ? `${missingOrderUsageOrders.length}件の候補があります`
+          : null,
+    },
+    {
+      key: "usage-diff",
+      label: "理論使用量との差分を確認",
+      warning:
+        orderUsageDiffs.length > 0
+          ? `${orderUsageDiffs.length}件の差分があります`
+          : null,
+    },
+    {
+      key: "stock-movements",
+      label: "今日の仕入れ・使用・廃棄・在庫修正を確認",
+      warning: dailyStockMovements.length === 0 ? "今日の在庫変動はありません" : null,
+    },
+    {
+      key: "waste",
+      label: "廃棄記録を確認",
+      warning:
+        closingMovementSummary.find((group) => group.category === "廃棄")?.count
+          ? null
+          : "今日の廃棄記録はありません",
+    },
+    {
+      key: "corrections",
+      label: "在庫修正・閉店チェック補正の理由を確認",
+      warning: null,
+    },
+  ];
+  const completedClosingChecklistCount = closingChecklistItems.filter(
+    (item) => closingChecklist[item.key]
+  ).length;
   const formatOrderDate = (value: string | null) =>
     value ? new Date(value).toLocaleString() : "";
 
@@ -2952,6 +3026,72 @@ const orderSectionHeaderStyle: React.CSSProperties = {
               </div>
             ))}
           </div>
+
+          <section
+            style={{
+              border: "1px solid #e5e7eb",
+              borderRadius: 8,
+              padding: 12,
+              background: "#fff",
+              marginBottom: 16,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 8,
+                alignItems: "center",
+                flexWrap: "wrap",
+                marginBottom: 10,
+              }}
+            >
+              <h3 style={{ margin: 0 }}>閉店後チェックリスト</h3>
+              <strong>
+                {completedClosingChecklistCount}/{closingChecklistItems.length}
+              </strong>
+            </div>
+            <div style={{ display: "grid", gap: 8 }}>
+              {closingChecklistItems.map((item) => (
+                <label
+                  key={item.key}
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    alignItems: "flex-start",
+                    padding: 8,
+                    border: "1px solid #f3f4f6",
+                    borderRadius: 6,
+                    background: closingChecklist[item.key] ? "#f0fdf4" : "#fff",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={Boolean(closingChecklist[item.key])}
+                    onChange={(e) =>
+                      updateClosingChecklist(item.key, e.target.checked)
+                    }
+                    style={{ marginTop: 3 }}
+                  />
+                  <span>
+                    <strong>{item.label}</strong>
+                    {item.warning && (
+                      <span
+                        style={{
+                          display: "block",
+                          marginTop: 2,
+                          color: "#b45309",
+                          fontSize: 13,
+                        }}
+                      >
+                        {item.warning}
+                      </span>
+                    )}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </section>
 
           <div
             style={{
