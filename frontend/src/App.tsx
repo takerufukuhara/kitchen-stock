@@ -57,9 +57,11 @@ const CUSTOMER_GROUP_ID_KEY = "kitchen-stock-customer-group-id";
 const CUSTOMER_CHECKOUT_REQUESTED_KEY = "kitchen-stock-checkout-requested";
 const CLOSING_CHECKLIST_KEY_PREFIX = "kitchen-stock-closing-checklist";
 const CLOSING_FINISHED_KEY_PREFIX = "kitchen-stock-closing-finished";
+const HIDDEN_CLOSING_CHECKLIST_ITEMS_KEY = "kitchen-stock-hidden-closing-checklist-items";
 const CUSTOM_CLOSING_CHECKLIST_ITEMS_KEY = "kitchen-stock-custom-closing-checklist-items";
 const OPENING_CHECKLIST_KEY_PREFIX = "kitchen-stock-opening-checklist";
 const OPENING_FINISHED_KEY_PREFIX = "kitchen-stock-opening-finished";
+const HIDDEN_OPENING_CHECKLIST_ITEMS_KEY = "kitchen-stock-hidden-opening-checklist-items";
 
 const normalizeNumberInput = (value: string) =>
   value
@@ -1052,9 +1054,11 @@ function AdminApp({ onLogout }: { onLogout: () => void }) {
   const [closingChecklist, setClosingChecklist] = useState<Record<string, boolean>>({});
   const [closingFinished, setClosingFinished] = useState(false);
   const [closingReports, setClosingReports] = useState<ClosingReport[]>([]);
+  const [hiddenClosingChecklistKeys, setHiddenClosingChecklistKeys] = useState<string[]>([]);
   const [openingChecklist, setOpeningChecklist] = useState<Record<string, boolean>>({});
   const [openingFinished, setOpeningFinished] = useState(false);
   const [openingReports, setOpeningReports] = useState<OpeningReport[]>([]);
+  const [hiddenOpeningChecklistKeys, setHiddenOpeningChecklistKeys] = useState<string[]>([]);
   const [customOpeningChecklistItems, setCustomOpeningChecklistItems] = useState<
     OpeningChecklistItem[]
   >([]);
@@ -1274,6 +1278,15 @@ const cancelEdit = () => {
     }
   };
 
+  const loadHiddenOpeningChecklistItems = () => {
+    try {
+      const raw = window.localStorage.getItem(HIDDEN_OPENING_CHECKLIST_ITEMS_KEY);
+      setHiddenOpeningChecklistKeys(raw ? JSON.parse(raw) : []);
+    } catch {
+      setHiddenOpeningChecklistKeys([]);
+    }
+  };
+
   const loadCustomOpeningChecklistItems = async () => {
     try {
       const items = await fetchOpeningChecklistItems();
@@ -1344,6 +1357,27 @@ const cancelEdit = () => {
     }
   };
 
+  const deleteDefaultOpeningChecklistItem = (key: string) => {
+    if (!confirm("このチェック項目を削除しますか？")) return;
+
+    setHiddenOpeningChecklistKeys((prev) => {
+      const next = Array.from(new Set([...prev, key]));
+      window.localStorage.setItem(
+        HIDDEN_OPENING_CHECKLIST_ITEMS_KEY,
+        JSON.stringify(next)
+      );
+      return next;
+    });
+    setOpeningChecklist((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      window.localStorage.setItem(getOpeningChecklistKey(), JSON.stringify(next));
+      return next;
+    });
+    window.localStorage.removeItem(getOpeningFinishedKey());
+    setOpeningFinished(false);
+  };
+
   const loadClosingChecklist = () => {
     try {
       const raw = window.localStorage.getItem(getClosingChecklistKey());
@@ -1363,6 +1397,15 @@ const cancelEdit = () => {
       setCustomClosingChecklistItems(raw ? JSON.parse(raw) : []);
     } catch {
       setCustomClosingChecklistItems([]);
+    }
+  };
+
+  const loadHiddenClosingChecklistItems = () => {
+    try {
+      const raw = window.localStorage.getItem(HIDDEN_CLOSING_CHECKLIST_ITEMS_KEY);
+      setHiddenClosingChecklistKeys(raw ? JSON.parse(raw) : []);
+    } catch {
+      setHiddenClosingChecklistKeys([]);
     }
   };
 
@@ -1477,6 +1520,27 @@ const cancelEdit = () => {
     saveCustomClosingChecklistItems(
       customClosingChecklistItems.filter((item) => item.key !== key)
     );
+    setClosingChecklist((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      window.localStorage.setItem(getClosingChecklistKey(), JSON.stringify(next));
+      return next;
+    });
+    window.localStorage.removeItem(getClosingFinishedKey());
+    setClosingFinished(false);
+  };
+
+  const deleteDefaultClosingChecklistItem = (key: string) => {
+    if (!confirm("このチェック項目を削除しますか？")) return;
+
+    setHiddenClosingChecklistKeys((prev) => {
+      const next = Array.from(new Set([...prev, key]));
+      window.localStorage.setItem(
+        HIDDEN_CLOSING_CHECKLIST_ITEMS_KEY,
+        JSON.stringify(next)
+      );
+      return next;
+    });
     setClosingChecklist((prev) => {
       const next = { ...prev };
       delete next[key];
@@ -1755,11 +1819,13 @@ const cancelEdit = () => {
       loadClosingCheckData();
       loadClosingChecklist();
       loadCustomClosingChecklistItems();
+      loadHiddenClosingChecklistItems();
     }
     if (activeTab === "opening") {
       loadOpeningCheckData();
       loadOpeningChecklist();
       loadCustomOpeningChecklistItems();
+      loadHiddenOpeningChecklistItems();
     }
     if (activeTab === "orders") {
       const intervalId = window.setInterval(loadOrderData, 5000);
@@ -2118,7 +2184,7 @@ const cancelEdit = () => {
       if (orderDiff !== 0) return orderDiff;
       return (a.item?.name ?? "").localeCompare(b.item?.name ?? "", "ja");
     });
-  const closingChecklistItems = [
+  const defaultClosingChecklistItems = [
     {
       key: "open-orders",
       label: "調理中・待ちの注文が残っていないか確認",
@@ -2155,6 +2221,11 @@ const cancelEdit = () => {
       label: "在庫修正・閉店チェック補正の理由を確認",
       warning: null,
     },
+  ];
+  const closingChecklistItems = [
+    ...defaultClosingChecklistItems.filter(
+      (item) => !hiddenClosingChecklistKeys.includes(item.key)
+    ),
     ...customClosingChecklistItems.map((item) => ({
       ...item,
       warning: null,
@@ -2167,7 +2238,7 @@ const cancelEdit = () => {
   const allClosingChecklistDone =
     closingChecklistItems.length > 0 &&
     completedClosingChecklistCount === closingChecklistItems.length;
-  const openingChecklistItems = [
+  const defaultOpeningChecklistItems = [
     {
       key: "staff-ready",
       label: "スタッフの出勤・持ち場を確認",
@@ -2193,6 +2264,11 @@ const cancelEdit = () => {
       label: "仕込み状況を確認",
       warning: null,
     },
+  ];
+  const openingChecklistItems = [
+    ...defaultOpeningChecklistItems.filter(
+      (item) => !hiddenOpeningChecklistKeys.includes(item.key)
+    ),
     ...customOpeningChecklistItems.map((item) => ({
       key: `custom:${item.id}`,
       label: item.label,
@@ -2956,15 +3032,17 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                         <strong>{item.label}</strong>
                       </span>
                     </label>
-                    {"custom" in item && item.custom && (
-                      <button
-                        type="button"
-                        onClick={() => deleteCustomOpeningChecklistItem(item.id)}
-                        disabled={loading}
-                      >
-                        削除
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        "id" in item && typeof item.id === "string"
+                          ? deleteCustomOpeningChecklistItem(item.id)
+                          : deleteDefaultOpeningChecklistItem(item.key)
+                      }
+                      disabled={loading}
+                    >
+                      削除
+                    </button>
                   </div>
                 ))}
                 <div
@@ -3841,15 +3919,17 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                       )}
                     </span>
                   </label>
-                  {"custom" in item && item.custom && (
-                    <button
-                      type="button"
-                      onClick={() => deleteCustomClosingChecklistItem(item.key)}
-                      disabled={loading}
-                    >
-                      削除
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      "custom" in item && item.custom
+                        ? deleteCustomClosingChecklistItem(item.key)
+                        : deleteDefaultClosingChecklistItem(item.key)
+                    }
+                    disabled={loading}
+                  >
+                    削除
+                  </button>
                 </div>
               ))}
               <div
