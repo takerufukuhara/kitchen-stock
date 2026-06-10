@@ -1593,9 +1593,17 @@ const cancelEdit = () => {
     try {
       setLoading(true);
       setError(null);
-      const reports = await fetchOpeningReports();
+      const { since, until } = getTodayRange();
+      const [itemData, stockMovementData, reports] = await Promise.all([
+        fetchItems(),
+        fetchStockMovements({ since, until, limit: 200 }),
+        fetchOpeningReports(),
+      ]);
+      setItems(itemData);
+      setDailyStockMovements(stockMovementData);
       setOpeningReports(reports);
     } catch (e) {
+      setDailyStockMovements([]);
       setOpeningReports([]);
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -2128,6 +2136,12 @@ const cancelEdit = () => {
     }
     return movement.delta >= 0 ? "仕入れ" : "使用";
   };
+  const todayPurchaseMovements = dailyStockMovements
+    .filter((movement) => getStockMovementCategory(movement) === "仕入れ")
+    .sort(
+      (a, b) =>
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
   const closingMovementCategories = ["仕入れ", "使用", "廃棄", "在庫修正"];
   const closingMovementSummary = closingMovementCategories.map((category) => {
     const movements = dailyStockMovements.filter(
@@ -2972,6 +2986,111 @@ const orderSectionHeaderStyle: React.CSSProperties = {
               更新
             </button>
           </div>
+
+          <section>
+            <button
+              type="button"
+              onClick={() => toggleOpeningSection("purchases")}
+              style={orderSectionHeaderStyle}
+            >
+              <span>
+                {isOpeningSectionOpen("purchases") ? "▼" : "▶"} 本日の仕入れ確認
+              </span>
+              <strong>{todayPurchaseMovements.length}件</strong>
+            </button>
+            {isOpeningSectionOpen("purchases") && (
+              <div
+                style={{
+                  display: "grid",
+                  gap: 8,
+                  marginTop: 8,
+                  marginBottom: 16,
+                  padding: 12,
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 8,
+                  background: "#fff",
+                }}
+              >
+                {todayPurchaseMovements.length === 0 ? (
+                  <p style={{ margin: 0, color: "#6b7280" }}>
+                    本日の仕入れ記録はありません
+                  </p>
+                ) : (
+                  todayPurchaseMovements.map((movement) => {
+                    const item = itemsById.get(movement.item_id);
+                    return (
+                      <div
+                        key={movement.id}
+                        style={{
+                          border: "1px solid #f3f4f6",
+                          borderRadius: 6,
+                          padding: 8,
+                        }}
+                      >
+                        <strong>{item?.name ?? "商品不明"}</strong>
+                        <p style={{ margin: "4px 0 0", color: "#4b5563" }}>
+                          +{formatStockQuantity(Math.abs(movement.delta))}
+                          {item?.unit ?? ""} / {formatOrderTime(movement.created_at)}
+                        </p>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            )}
+          </section>
+
+          <section>
+            <button
+              type="button"
+              onClick={() => toggleOpeningSection("low-stock")}
+              style={orderSectionHeaderStyle}
+            >
+              <span>
+                {isOpeningSectionOpen("low-stock") ? "▼" : "▶"} 在庫基準未満チェック
+              </span>
+              <strong>{lowStockItems.length}件</strong>
+            </button>
+            {isOpeningSectionOpen("low-stock") && (
+              <div
+                style={{
+                  display: "grid",
+                  gap: 8,
+                  marginTop: 8,
+                  marginBottom: 16,
+                  padding: 12,
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 8,
+                  background: "#fff",
+                }}
+              >
+                {lowStockItems.length === 0 ? (
+                  <p style={{ margin: 0, color: "#166534", fontWeight: 700 }}>
+                    在庫基準を下回っている商品はありません
+                  </p>
+                ) : (
+                  lowStockItems.map((item) => (
+                    <div
+                      key={item.id}
+                      style={{
+                        border: "1px solid #f3f4f6",
+                        borderRadius: 6,
+                        padding: 8,
+                      }}
+                    >
+                      <strong>{item.name}</strong>
+                      <p style={{ margin: "4px 0 0", color: "#4b5563" }}>
+                        現在 {formatStockQuantity(Math.max(0, item.current_stock))}
+                        {item.unit} / 在庫基準 {formatStockQuantity(item.par_level ?? 0)}
+                        {item.unit} / 不足 {formatStockQuantity(item.shortage)}
+                        {item.unit}
+                      </p>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </section>
 
           <section>
             <button
