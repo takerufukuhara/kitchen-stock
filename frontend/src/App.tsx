@@ -46,6 +46,7 @@ const CUSTOMER_ORDER_IDS_KEY = "kitchen-stock-customer-order-ids";
 const CUSTOMER_GROUP_ID_KEY = "kitchen-stock-customer-group-id";
 const CUSTOMER_CHECKOUT_REQUESTED_KEY = "kitchen-stock-checkout-requested";
 const CLOSING_CHECKLIST_KEY_PREFIX = "kitchen-stock-closing-checklist";
+const CUSTOM_CLOSING_CHECKLIST_ITEMS_KEY = "kitchen-stock-custom-closing-checklist-items";
 
 const normalizeNumberInput = (value: string) =>
   value
@@ -1036,6 +1037,10 @@ function AdminApp({ onLogout }: { onLogout: () => void }) {
   const [staffCalls, setStaffCalls] = useState<StaffCall[]>([]);
   const [customerGroupOptions, setCustomerGroupOptions] = useState<CustomerGroupOption[]>([]);
   const [closingChecklist, setClosingChecklist] = useState<Record<string, boolean>>({});
+  const [customClosingChecklistItems, setCustomClosingChecklistItems] = useState<
+    { key: string; label: string }[]
+  >([]);
+  const [newClosingChecklistItem, setNewClosingChecklistItem] = useState("");
 
   const [newMenuName, setNewMenuName] = useState("");
   const [newMenuCategory, setNewMenuCategory] = useState("");
@@ -1047,6 +1052,9 @@ function AdminApp({ onLogout }: { onLogout: () => void }) {
   const [orderMenuId, setOrderMenuId] = useState("");
   const [orderQuantity, setOrderQuantity] = useState("1");
   const [openOrderSections, setOpenOrderSections] = useState<Record<string, boolean>>({});
+  const [openClosingSections, setOpenClosingSections] = useState<Record<string, boolean>>({
+    checklist: true,
+  });
   const [menuFormOpen, setMenuFormOpen] = useState(false);
   const [recipeFormOpen, setRecipeFormOpen] = useState(false);
   const [expandedRecipeMenuId, setExpandedRecipeMenuId] = useState<string | null>(null);
@@ -1215,9 +1223,57 @@ const cancelEdit = () => {
     }
   };
 
+  const loadCustomClosingChecklistItems = () => {
+    try {
+      const raw = window.localStorage.getItem(CUSTOM_CLOSING_CHECKLIST_ITEMS_KEY);
+      setCustomClosingChecklistItems(raw ? JSON.parse(raw) : []);
+    } catch {
+      setCustomClosingChecklistItems([]);
+    }
+  };
+
   const updateClosingChecklist = (key: string, checked: boolean) => {
     setClosingChecklist((prev) => {
       const next = { ...prev, [key]: checked };
+      window.localStorage.setItem(getClosingChecklistKey(), JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const saveCustomClosingChecklistItems = (
+    items: { key: string; label: string }[]
+  ) => {
+    setCustomClosingChecklistItems(items);
+    window.localStorage.setItem(
+      CUSTOM_CLOSING_CHECKLIST_ITEMS_KEY,
+      JSON.stringify(items)
+    );
+  };
+
+  const addCustomClosingChecklistItem = () => {
+    const label = newClosingChecklistItem.trim();
+    if (!label) {
+      setError("追加するチェック項目を入力してください");
+      return;
+    }
+
+    saveCustomClosingChecklistItems([
+      ...customClosingChecklistItems,
+      { key: `custom:${Date.now()}`, label },
+    ]);
+    setNewClosingChecklistItem("");
+    setError(null);
+  };
+
+  const deleteCustomClosingChecklistItem = (key: string) => {
+    if (!confirm("このチェック項目を削除しますか？")) return;
+
+    saveCustomClosingChecklistItems(
+      customClosingChecklistItems.filter((item) => item.key !== key)
+    );
+    setClosingChecklist((prev) => {
+      const next = { ...prev };
+      delete next[key];
       window.localStorage.setItem(getClosingChecklistKey(), JSON.stringify(next));
       return next;
     });
@@ -1466,6 +1522,7 @@ const cancelEdit = () => {
     if (activeTab === "closing") {
       loadClosingCheckData();
       loadClosingChecklist();
+      loadCustomClosingChecklistItems();
     }
     if (activeTab === "orders") {
       const intervalId = window.setInterval(loadOrderData, 5000);
@@ -1732,6 +1789,11 @@ const cancelEdit = () => {
     const key = getOrderSectionKey(groupId, section);
     setOpenOrderSections((prev) => ({ ...prev, [key]: !prev[key] }));
   };
+  const isClosingSectionOpen = (section: string) =>
+    Boolean(openClosingSections[section]);
+  const toggleClosingSection = (section: string) => {
+    setOpenClosingSections((prev) => ({ ...prev, [section]: !prev[section] }));
+  };
   const itemsById = new Map(items.map((item) => [item.id, item]));
   const todayRange = getTodayRange();
   const isTodayDate = (value: string | null) => {
@@ -1814,15 +1876,6 @@ const cancelEdit = () => {
       if (orderDiff !== 0) return orderDiff;
       return (a.item?.name ?? "").localeCompare(b.item?.name ?? "", "ja");
     });
-  const missingOrderUsageOrders = completedStockTargetOrders.filter((order) => {
-    const menu = menuItemsById.get(order.menu_item_id);
-    if (!menu) return false;
-    return menu.recipes.some((recipe) => {
-      const expectedQty = Number(recipe.quantity) * Number(order.quantity);
-      const actualQty = getActualOrderUsageQty(order.id, recipe.item_id);
-      return expectedQty > 0 && actualQty <= 0;
-    });
-  });
   const closingChecklistItems = [
     {
       key: "open-orders",
@@ -1830,25 +1883,22 @@ const cancelEdit = () => {
       warning: todayActiveOrders.length > 0 ? `${todayActiveOrders.length}件残っています` : null,
     },
     {
-      key: "missing-usage",
-      label: "注文使用漏れチェックを確認",
-      warning:
-        missingOrderUsageOrders.length > 0
-          ? `${missingOrderUsageOrders.length}件の候補があります`
-          : null,
-    },
-    {
       key: "usage-diff",
-      label: "理論使用量との差分を確認",
+      label: "在庫反映漏れチェックを確認",
       warning:
         orderUsageDiffs.length > 0
-          ? `${orderUsageDiffs.length}件の差分があります`
+          ? `${orderUsageDiffs.length}件の反映漏れ候補があります`
           : null,
     },
     {
       key: "stock-movements",
       label: "今日の仕入れ・使用・廃棄・在庫修正を確認",
       warning: dailyStockMovements.length === 0 ? "今日の在庫変動はありません" : null,
+    },
+    {
+      key: "physical-stock",
+      label: "実際の在庫を目で確認",
+      warning: null,
     },
     {
       key: "waste",
@@ -1863,6 +1913,11 @@ const cancelEdit = () => {
       label: "在庫修正・閉店チェック補正の理由を確認",
       warning: null,
     },
+    ...customClosingChecklistItems.map((item) => ({
+      ...item,
+      warning: null,
+      custom: true,
+    })),
   ];
   const completedClosingChecklistCount = closingChecklistItems.filter(
     (item) => closingChecklist[item.key]
@@ -3027,76 +3082,11 @@ const orderSectionHeaderStyle: React.CSSProperties = {
             ))}
           </div>
 
-          <section
-            style={{
-              border: "1px solid #e5e7eb",
-              borderRadius: 8,
-              padding: 12,
-              background: "#fff",
-              marginBottom: 16,
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                gap: 8,
-                alignItems: "center",
-                flexWrap: "wrap",
-                marginBottom: 10,
-              }}
-            >
-              <h3 style={{ margin: 0 }}>閉店後チェックリスト</h3>
-              <strong>
-                {completedClosingChecklistCount}/{closingChecklistItems.length}
-              </strong>
-            </div>
-            <div style={{ display: "grid", gap: 8 }}>
-              {closingChecklistItems.map((item) => (
-                <label
-                  key={item.key}
-                  style={{
-                    display: "flex",
-                    gap: 8,
-                    alignItems: "flex-start",
-                    padding: 8,
-                    border: "1px solid #f3f4f6",
-                    borderRadius: 6,
-                    background: closingChecklist[item.key] ? "#f0fdf4" : "#fff",
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={Boolean(closingChecklist[item.key])}
-                    onChange={(e) =>
-                      updateClosingChecklist(item.key, e.target.checked)
-                    }
-                    style={{ marginTop: 3 }}
-                  />
-                  <span>
-                    <strong>{item.label}</strong>
-                    {item.warning && (
-                      <span
-                        style={{
-                          display: "block",
-                          marginTop: 2,
-                          color: "#b45309",
-                          fontSize: 13,
-                        }}
-                      >
-                        {item.warning}
-                      </span>
-                    )}
-                  </span>
-                </label>
-              ))}
-            </div>
-          </section>
-
           <div
+            className="closing-check-grid"
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+              gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
               gap: 12,
               marginBottom: 16,
             }}
@@ -3107,76 +3097,27 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                 borderRadius: 8,
                 padding: 12,
                 background: "#fff",
+                gridColumn: isClosingSectionOpen("usage-diff") ? "1 / -1" : undefined,
               }}
             >
-              <h3 style={{ margin: "0 0 8px" }}>注文使用漏れチェック</h3>
-              <p style={{ margin: "0 0 10px", color: "#4b5563", fontSize: 14 }}>
-                完成済み注文のうち、今日の注文使用記録が見つからないものを表示します。
-              </p>
-              {missingOrderUsageOrders.length === 0 ? (
-                <p style={{ margin: 0, color: "#166534", fontWeight: 700 }}>
-                  注文使用漏れの候補はありません
-                </p>
-              ) : (
-                <div style={{ display: "grid", gap: 8 }}>
-                  {missingOrderUsageOrders.map((order) => (
-                    <div
-                      key={order.id}
-                      style={{
-                        border: "1px solid #fee2e2",
-                        borderRadius: 6,
-                        padding: 8,
-                        background: "#fff7f7",
-                      }}
-                    >
-                      <strong>{getJoinedName(order.menu_items) || "メニュー不明"}</strong>
-                      <p style={{ margin: "4px 0 0", color: "#991b1b" }}>
-                        {formatStockQuantity(order.quantity)}件 / 完了:{" "}
-                        {formatOrderTime(order.completed_at ?? order.created_at)}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-
-            <section
-              style={{
-                border: "1px solid #e5e7eb",
-                borderRadius: 8,
-                padding: 12,
-                background: "#fff",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: 8,
-                  alignItems: "center",
-                  flexWrap: "wrap",
-                  marginBottom: 8,
-                }}
+              <button
+                type="button"
+                onClick={() => toggleClosingSection("usage-diff")}
+                style={orderSectionHeaderStyle}
               >
-                <h3 style={{ margin: 0 }}>理論使用量との差分</h3>
-                <button
-                  onClick={applyClosingUsageDiff}
-                  disabled={loading || orderUsageDiffs.length === 0}
-                  style={{
-                    opacity: loading || orderUsageDiffs.length === 0 ? 0.55 : 1,
-                    cursor:
-                      loading || orderUsageDiffs.length === 0 ? "not-allowed" : "pointer",
-                  }}
-                >
-                  差分を補正記録として反映
-                </button>
-              </div>
+                <span>
+                  {isClosingSectionOpen("usage-diff") ? "▼" : "▶"} 在庫反映漏れチェック
+                </span>
+                {notificationBadge(orderUsageDiffs.length)}
+              </button>
+              {isClosingSectionOpen("usage-diff") && (
+              <div style={{ marginTop: 8 }}>
               <p style={{ margin: "0 0 10px", color: "#4b5563", fontSize: 14 }}>
-                レシピから計算した本来の使用量と、注文ごとの在庫使用記録を比較します。
+                注文で減るはずの食材数と、実際に在庫から減った数を比べます。
               </p>
               {orderUsageDiffs.length === 0 ? (
                 <p style={{ margin: 0, color: "#166534", fontWeight: 700 }}>
-                  未反映の差分はありません
+                  在庫反映漏れの候補はありません
                 </p>
               ) : (
                 <div style={{ display: "grid", gap: 8 }}>
@@ -3205,27 +3146,42 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                   ))}
                 </div>
               )}
+              <button
+                onClick={applyClosingUsageDiff}
+                disabled={loading || orderUsageDiffs.length === 0}
+                style={{
+                  marginTop: 10,
+                  opacity: loading || orderUsageDiffs.length === 0 ? 0.55 : 1,
+                  cursor:
+                    loading || orderUsageDiffs.length === 0 ? "not-allowed" : "pointer",
+                }}
+              >
+                未反映分を在庫に反映
+              </button>
+              </div>
+              )}
             </section>
-          </div>
-
-          <div
-            className="admin-two-column"
-            style={{
-              display: "grid",
-              gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
-              gap: 16,
-              alignItems: "start",
-            }}
-          >
             <section
               style={{
                 border: "1px solid #e5e7eb",
                 borderRadius: 8,
                 padding: 12,
                 background: "#fff",
+                gridColumn: isClosingSectionOpen("orders") ? "1 / -1" : undefined,
               }}
             >
-              <h3 style={{ margin: "0 0 10px" }}>今日の注文一覧</h3>
+              <button
+                type="button"
+                onClick={() => toggleClosingSection("orders")}
+                style={orderSectionHeaderStyle}
+              >
+                <span>
+                  {isClosingSectionOpen("orders") ? "▼" : "▶"} 今日の注文一覧
+                </span>
+                <strong>{todayOrders.length}件</strong>
+              </button>
+              {isClosingSectionOpen("orders") && (
+              <div style={{ marginTop: 8 }}>
               {todayOrders.length === 0 ? (
                 <p style={{ margin: 0, color: "#6b7280" }}>今日の注文はありません</p>
               ) : (
@@ -3251,6 +3207,8 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                   ))}
                 </div>
               )}
+              </div>
+              )}
             </section>
 
             <section
@@ -3259,9 +3217,21 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                 borderRadius: 8,
                 padding: 12,
                 background: "#fff",
+                gridColumn: isClosingSectionOpen("stock-movements") ? "1 / -1" : undefined,
               }}
             >
-              <h3 style={{ margin: "0 0 10px" }}>今日の在庫変動</h3>
+              <button
+                type="button"
+                onClick={() => toggleClosingSection("stock-movements")}
+                style={orderSectionHeaderStyle}
+              >
+                <span>
+                  {isClosingSectionOpen("stock-movements") ? "▼" : "▶"} 今日の在庫変動
+                </span>
+                <strong>{dailyStockMovements.length}件</strong>
+              </button>
+              {isClosingSectionOpen("stock-movements") && (
+              <div style={{ marginTop: 8 }}>
               {dailyStockMovements.length === 0 ? (
                 <p style={{ margin: 0, color: "#6b7280" }}>今日の在庫変動はありません</p>
               ) : (
@@ -3304,8 +3274,119 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                   ))}
                 </div>
               )}
+              </div>
+              )}
             </section>
           </div>
+
+          <section style={{ marginTop: 16 }}>
+            <button
+              type="button"
+              onClick={() => toggleClosingSection("checklist")}
+              style={orderSectionHeaderStyle}
+            >
+              <span>
+                {isClosingSectionOpen("checklist") ? "▼" : "▶"} 閉店後チェックリスト
+              </span>
+              <strong>
+                {completedClosingChecklistCount}/{closingChecklistItems.length}
+              </strong>
+            </button>
+            {isClosingSectionOpen("checklist") && (
+            <div
+              style={{
+                display: "grid",
+                gap: 8,
+                marginTop: 8,
+                padding: 12,
+                border: "1px solid #e5e7eb",
+                borderRadius: 8,
+                background: "#fff",
+              }}
+            >
+              {closingChecklistItems.map((item) => (
+                <div
+                  key={item.key}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 8,
+                    alignItems: "flex-start",
+                    padding: 8,
+                    border: "1px solid #f3f4f6",
+                    borderRadius: 6,
+                    background: closingChecklist[item.key] ? "#f0fdf4" : "#fff",
+                  }}
+                >
+                  <label
+                    style={{
+                      display: "flex",
+                      gap: 8,
+                      alignItems: "flex-start",
+                      flex: "1 1 auto",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={Boolean(closingChecklist[item.key])}
+                      onChange={(e) =>
+                        updateClosingChecklist(item.key, e.target.checked)
+                      }
+                      style={{ marginTop: 3 }}
+                    />
+                    <span>
+                      <strong>{item.label}</strong>
+                      {item.warning && (
+                        <span
+                          style={{
+                            display: "block",
+                            marginTop: 2,
+                            color: "#b45309",
+                            fontSize: 13,
+                          }}
+                        >
+                          {item.warning}
+                        </span>
+                      )}
+                    </span>
+                  </label>
+                  {"custom" in item && item.custom && (
+                    <button
+                      type="button"
+                      onClick={() => deleteCustomClosingChecklistItem(item.key)}
+                      disabled={loading}
+                    >
+                      削除
+                    </button>
+                  )}
+                </div>
+              ))}
+              <div
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                  paddingTop: 4,
+                }}
+              >
+                <input
+                  value={newClosingChecklistItem}
+                  onChange={(e) => setNewClosingChecklistItem(e.target.value)}
+                  placeholder="チェック項目を追加"
+                  style={{ ...inputStyle, flex: "1 1 240px" }}
+                />
+                <button
+                  type="button"
+                  onClick={addCustomClosingChecklistItem}
+                  disabled={loading}
+                >
+                  追加
+                </button>
+              </div>
+            </div>
+            )}
+          </section>
         </section>
       )}
 
