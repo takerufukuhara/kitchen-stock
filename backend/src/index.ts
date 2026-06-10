@@ -193,6 +193,70 @@ app.get("/stock-movements", requireAdmin, async (req, res) => {
   }
 });
 
+app.get("/closing-reports", requireAdmin, async (_req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("closing_reports")
+      .select(
+        "id,business_date,completed_at,checklist_total,checklist_completed,order_count,completed_order_count,active_order_count,canceled_order_count,stock_movement_count,stock_reconciliation_issue_count,checklist_items,created_at"
+      )
+      .order("business_date", { ascending: false })
+      .limit(30);
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data ?? []);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.post("/closing-reports", requireAdmin, async (req, res) => {
+  try {
+    const {
+      business_date,
+      checklist_total,
+      checklist_completed,
+      order_count,
+      completed_order_count,
+      active_order_count,
+      canceled_order_count,
+      stock_movement_count,
+      stock_reconciliation_issue_count,
+      checklist_items,
+    } = req.body ?? {};
+
+    if (!business_date) {
+      return res.status(400).json({ error: "business_date は必須です" });
+    }
+
+    const payload = {
+      business_date,
+      completed_at: new Date().toISOString(),
+      checklist_total: Number(checklist_total) || 0,
+      checklist_completed: Number(checklist_completed) || 0,
+      order_count: Number(order_count) || 0,
+      completed_order_count: Number(completed_order_count) || 0,
+      active_order_count: Number(active_order_count) || 0,
+      canceled_order_count: Number(canceled_order_count) || 0,
+      stock_movement_count: Number(stock_movement_count) || 0,
+      stock_reconciliation_issue_count:
+        Number(stock_reconciliation_issue_count) || 0,
+      checklist_items: Array.isArray(checklist_items) ? checklist_items : [],
+    };
+
+    const { data, error } = await supabase
+      .from("closing_reports")
+      .upsert(payload, { onConflict: "business_date" })
+      .select()
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.status(201).json(data);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
 app.get("/waste-summary", requireAdmin, async (_req, res) => {
   try {
     const { data: items, error: itemsError } = await supabase

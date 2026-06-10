@@ -218,7 +218,8 @@ button:disabled {
   }
 
   .admin-two-column,
-  .order-table-grid {
+  .order-table-grid,
+  .closing-check-grid {
     grid-template-columns: minmax(0, 1fr) !important;
   }
 

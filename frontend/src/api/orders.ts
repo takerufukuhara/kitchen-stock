@@ -65,6 +65,22 @@ export type CustomerGroupOption = {
   active_group: CustomerGroup | null;
 };
 
+export type ClosingReport = {
+  id: string;
+  business_date: string;
+  completed_at: string;
+  checklist_total: number;
+  checklist_completed: number;
+  order_count: number;
+  completed_order_count: number;
+  active_order_count: number;
+  canceled_order_count: number;
+  stock_movement_count: number;
+  stock_reconciliation_issue_count: number;
+  checklist_items: { key: string; label: string; checked: boolean }[];
+  created_at: string;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!API) throw new Error("VITE_API_URL が未設定です");
 
@@ -157,6 +173,31 @@ export async function deleteRecipe(id: string): Promise<void> {
 export async function fetchOrders(): Promise<Order[]> {
   return request<Order[]>("/orders", {
     headers: adminHeaders(),
+  });
+}
+
+export async function fetchClosingReports(): Promise<ClosingReport[]> {
+  return request<ClosingReport[]>("/closing-reports", {
+    headers: adminHeaders(),
+  });
+}
+
+export async function createClosingReport(params: {
+  business_date: string;
+  checklist_total: number;
+  checklist_completed: number;
+  order_count: number;
+  completed_order_count: number;
+  active_order_count: number;
+  canceled_order_count: number;
+  stock_movement_count: number;
+  stock_reconciliation_issue_count: number;
+  checklist_items: { key: string; label: string; checked: boolean }[];
+}): Promise<ClosingReport> {
+  return request<ClosingReport>("/closing-reports", {
+    method: "POST",
+    headers: adminHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(params),
   });
 }
 

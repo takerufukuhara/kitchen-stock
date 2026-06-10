@@ -11,6 +11,7 @@ import {
   confirmOrderCancellation,
   confirmStaffCall,
   createCustomerGroup,
+  createClosingReport,
   createStaffCall,
   createMenuItem,
   createOrder,
@@ -19,6 +20,7 @@ import {
   deleteRecipe,
   fetchCustomerGroup,
   fetchCustomerGroupOptions,
+  fetchClosingReports,
   fetchMenuItems,
   fetchPublicMenuItems,
   fetchOrderStatus,
@@ -31,6 +33,7 @@ import {
   updateMenuItem,
   type CustomerGroup,
   type CustomerGroupOption,
+  type ClosingReport,
   type MenuItem,
   type Order,
   type StaffCall,
@@ -46,6 +49,7 @@ const CUSTOMER_ORDER_IDS_KEY = "kitchen-stock-customer-order-ids";
 const CUSTOMER_GROUP_ID_KEY = "kitchen-stock-customer-group-id";
 const CUSTOMER_CHECKOUT_REQUESTED_KEY = "kitchen-stock-checkout-requested";
 const CLOSING_CHECKLIST_KEY_PREFIX = "kitchen-stock-closing-checklist";
+const CLOSING_FINISHED_KEY_PREFIX = "kitchen-stock-closing-finished";
 const CUSTOM_CLOSING_CHECKLIST_ITEMS_KEY = "kitchen-stock-custom-closing-checklist-items";
 
 const normalizeNumberInput = (value: string) =>
@@ -1037,6 +1041,8 @@ function AdminApp({ onLogout }: { onLogout: () => void }) {
   const [staffCalls, setStaffCalls] = useState<StaffCall[]>([]);
   const [customerGroupOptions, setCustomerGroupOptions] = useState<CustomerGroupOption[]>([]);
   const [closingChecklist, setClosingChecklist] = useState<Record<string, boolean>>({});
+  const [closingFinished, setClosingFinished] = useState(false);
+  const [closingReports, setClosingReports] = useState<ClosingReport[]>([]);
   const [customClosingChecklistItems, setCustomClosingChecklistItems] = useState<
     { key: string; label: string }[]
   >([]);
@@ -1205,21 +1211,34 @@ const cancelEdit = () => {
   };
 
   const getClosingChecklistKey = () => {
+    const dateKey = getBusinessDateKey();
+    return `${CLOSING_CHECKLIST_KEY_PREFIX}:${dateKey}`;
+  };
+
+  const getBusinessDateKey = () => {
     const start = getTodayRange().start;
-    const dateKey = [
+    return [
       start.getFullYear(),
       String(start.getMonth() + 1).padStart(2, "0"),
       String(start.getDate()).padStart(2, "0"),
     ].join("-");
-    return `${CLOSING_CHECKLIST_KEY_PREFIX}:${dateKey}`;
+  };
+
+  const getClosingFinishedKey = () => {
+    const dateKey = getBusinessDateKey();
+    return `${CLOSING_FINISHED_KEY_PREFIX}:${dateKey}`;
   };
 
   const loadClosingChecklist = () => {
     try {
       const raw = window.localStorage.getItem(getClosingChecklistKey());
       setClosingChecklist(raw ? JSON.parse(raw) : {});
+      setClosingFinished(
+        window.localStorage.getItem(getClosingFinishedKey()) === "true"
+      );
     } catch {
       setClosingChecklist({});
+      setClosingFinished(false);
     }
   };
 
@@ -1236,8 +1255,48 @@ const cancelEdit = () => {
     setClosingChecklist((prev) => {
       const next = { ...prev, [key]: checked };
       window.localStorage.setItem(getClosingChecklistKey(), JSON.stringify(next));
+      if (!checked) {
+        window.localStorage.removeItem(getClosingFinishedKey());
+        setClosingFinished(false);
+      }
       return next;
     });
+  };
+
+  const finishClosingWork = async () => {
+    if (!confirm("閉店作業を終了しますか？")) return;
+
+    try {
+      setLoading(true);
+      setError(null);
+      const report = await createClosingReport({
+        business_date: getBusinessDateKey(),
+        checklist_total: closingChecklistItems.length,
+        checklist_completed: completedClosingChecklistCount,
+        order_count: todayOrders.length,
+        completed_order_count: todayCompletedOrders.length,
+        active_order_count: todayActiveOrders.length,
+        canceled_order_count: todayCanceledOrders.length,
+        stock_movement_count: dailyStockMovements.length,
+        stock_reconciliation_issue_count: orderUsageDiffs.length,
+        checklist_items: closingChecklistItems.map((item) => ({
+          key: item.key,
+          label: item.label,
+          checked: Boolean(closingChecklist[item.key]),
+        })),
+      });
+
+      window.localStorage.setItem(getClosingFinishedKey(), "true");
+      setClosingFinished(true);
+      setClosingReports((prev) => [
+        report,
+        ...prev.filter((item) => item.business_date !== report.business_date),
+      ]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const saveCustomClosingChecklistItems = (
@@ -1262,6 +1321,8 @@ const cancelEdit = () => {
       { key: `custom:${Date.now()}`, label },
     ]);
     setNewClosingChecklistItem("");
+    window.localStorage.removeItem(getClosingFinishedKey());
+    setClosingFinished(false);
     setError(null);
   };
 
@@ -1277,6 +1338,8 @@ const cancelEdit = () => {
       window.localStorage.setItem(getClosingChecklistKey(), JSON.stringify(next));
       return next;
     });
+    window.localStorage.removeItem(getClosingFinishedKey());
+    setClosingFinished(false);
   };
 
   const loadClosingCheckData = async () => {
@@ -1284,7 +1347,15 @@ const cancelEdit = () => {
       setLoading(true);
       setError(null);
       const { since, until } = getTodayRange();
-      const [itemData, menuData, orderData, staffCallData, customerGroupData, stockMovementData] =
+      const [
+        itemData,
+        menuData,
+        orderData,
+        staffCallData,
+        customerGroupData,
+        stockMovementData,
+        closingReportData,
+      ] =
         await Promise.all([
           fetchItems(),
           fetchMenuItems(),
@@ -1292,6 +1363,7 @@ const cancelEdit = () => {
           fetchStaffCalls(),
           fetchCustomerGroupOptions(),
           fetchStockMovements({ since, until, limit: 200 }),
+          fetchClosingReports(),
         ]);
       setItems(itemData);
       setMenuItems(menuData);
@@ -1299,6 +1371,7 @@ const cancelEdit = () => {
       setStaffCalls(staffCallData);
       setCustomerGroupOptions(customerGroupData);
       setDailyStockMovements(stockMovementData);
+      setClosingReports(closingReportData);
     } catch (e) {
       setDailyStockMovements([]);
       setError(e instanceof Error ? e.message : String(e));
@@ -1922,6 +1995,9 @@ const cancelEdit = () => {
   const completedClosingChecklistCount = closingChecklistItems.filter(
     (item) => closingChecklist[item.key]
   ).length;
+  const allClosingChecklistDone =
+    closingChecklistItems.length > 0 &&
+    completedClosingChecklistCount === closingChecklistItems.length;
   const formatOrderDate = (value: string | null) =>
     value ? new Date(value).toLocaleString() : "";
 
@@ -3384,7 +3460,88 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                   追加
                 </button>
               </div>
+              {allClosingChecklistDone && !closingFinished && (
+                <button
+                  type="button"
+                  onClick={finishClosingWork}
+                  disabled={loading}
+                  style={{ marginTop: 4 }}
+                >
+                  閉店作業を終了する
+                </button>
+              )}
+              {closingFinished && (
+                <p
+                  style={{
+                    margin: "4px 0 0",
+                    padding: 10,
+                    borderRadius: 6,
+                    background: "#f0fdf4",
+                    color: "#166534",
+                    fontWeight: 700,
+                  }}
+                >
+                  お疲れ様でした。
+                </p>
+              )}
             </div>
+            )}
+          </section>
+
+          <section style={{ marginTop: 16 }}>
+            <button
+              type="button"
+              onClick={() => toggleClosingSection("history")}
+              style={orderSectionHeaderStyle}
+            >
+              <span>
+                {isClosingSectionOpen("history") ? "▼" : "▶"} 閉店履歴
+              </span>
+              <strong>{closingReports.length}件</strong>
+            </button>
+            {isClosingSectionOpen("history") && (
+              <div
+                style={{
+                  display: "grid",
+                  gap: 8,
+                  marginTop: 8,
+                  padding: 12,
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 8,
+                  background: "#fff",
+                }}
+              >
+                {closingReports.length === 0 ? (
+                  <p style={{ margin: 0, color: "#6b7280" }}>
+                    閉店履歴はまだありません
+                  </p>
+                ) : (
+                  closingReports.map((report) => (
+                    <div
+                      key={report.id}
+                      style={{
+                        border: "1px solid #f3f4f6",
+                        borderRadius: 6,
+                        padding: 8,
+                      }}
+                    >
+                      <strong>
+                        {report.business_date} /{" "}
+                        {new Date(report.completed_at).toLocaleTimeString([], {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </strong>
+                      <p style={{ margin: "4px 0 0", color: "#4b5563" }}>
+                        チェック {report.checklist_completed}/{report.checklist_total} / 注文{" "}
+                        {report.order_count}件 / 完了 {report.completed_order_count}件 / 在庫変動{" "}
+                        {report.stock_movement_count}件 / 反映漏れ候補{" "}
+                        {report.stock_reconciliation_issue_count}件
+                      </p>
+                    </div>
+                  ))
+                )}
+              </div>
             )}
           </section>
         </section>
