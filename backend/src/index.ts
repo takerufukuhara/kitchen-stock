@@ -257,6 +257,110 @@ app.post("/closing-reports", requireAdmin, async (req, res) => {
   }
 });
 
+app.get("/opening-reports", requireAdmin, async (_req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("opening_reports")
+      .select("id,business_date,completed_at,checklist_total,checklist_completed,checklist_items,created_at")
+      .order("business_date", { ascending: false })
+      .limit(30);
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data ?? []);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.post("/opening-reports", requireAdmin, async (req, res) => {
+  try {
+    const { business_date, checklist_total, checklist_completed, checklist_items } =
+      req.body ?? {};
+
+    if (!business_date) {
+      return res.status(400).json({ error: "business_date は必須です" });
+    }
+
+    const payload = {
+      business_date,
+      completed_at: new Date().toISOString(),
+      checklist_total: Number(checklist_total) || 0,
+      checklist_completed: Number(checklist_completed) || 0,
+      checklist_items: Array.isArray(checklist_items) ? checklist_items : [],
+    };
+
+    const { data, error } = await supabase
+      .from("opening_reports")
+      .upsert(payload, { onConflict: "business_date" })
+      .select()
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.status(201).json(data);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.get("/opening-checklist-items", requireAdmin, async (_req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("opening_checklist_items")
+      .select("id,label,sort_order,is_active,created_at")
+      .eq("is_active", true)
+      .order("sort_order", { ascending: true })
+      .order("created_at", { ascending: true });
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data ?? []);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.post("/opening-checklist-items", requireAdmin, async (req, res) => {
+  try {
+    const label = String(req.body?.label ?? "").trim();
+    if (!label) {
+      return res.status(400).json({ error: "label は必須です" });
+    }
+
+    const { data: latest, error: latestError } = await supabase
+      .from("opening_checklist_items")
+      .select("sort_order")
+      .order("sort_order", { ascending: false })
+      .limit(1);
+
+    if (latestError) return res.status(500).json({ error: latestError.message });
+
+    const nextSortOrder = Number(latest?.[0]?.sort_order ?? 0) + 1;
+    const { data, error } = await supabase
+      .from("opening_checklist_items")
+      .insert({ label, sort_order: nextSortOrder, is_active: true })
+      .select("id,label,sort_order,is_active,created_at")
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.status(201).json(data);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.delete("/opening-checklist-items/:id", requireAdmin, async (req, res) => {
+  try {
+    const { error } = await supabase
+      .from("opening_checklist_items")
+      .update({ is_active: false })
+      .eq("id", req.params.id);
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.status(204).send();
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
 app.get("/waste-summary", requireAdmin, async (_req, res) => {
   try {
     const { data: items, error: itemsError } = await supabase

@@ -12,6 +12,9 @@ import {
   confirmStaffCall,
   createCustomerGroup,
   createClosingReport,
+  createOpeningChecklistItem,
+  createOpeningReport,
+  deleteOpeningChecklistItem,
   createStaffCall,
   createMenuItem,
   createOrder,
@@ -21,6 +24,8 @@ import {
   fetchCustomerGroup,
   fetchCustomerGroupOptions,
   fetchClosingReports,
+  fetchOpeningChecklistItems,
+  fetchOpeningReports,
   fetchMenuItems,
   fetchPublicMenuItems,
   fetchOrderStatus,
@@ -34,6 +39,8 @@ import {
   type CustomerGroup,
   type CustomerGroupOption,
   type ClosingReport,
+  type OpeningChecklistItem,
+  type OpeningReport,
   type MenuItem,
   type Order,
   type StaffCall,
@@ -51,6 +58,8 @@ const CUSTOMER_CHECKOUT_REQUESTED_KEY = "kitchen-stock-checkout-requested";
 const CLOSING_CHECKLIST_KEY_PREFIX = "kitchen-stock-closing-checklist";
 const CLOSING_FINISHED_KEY_PREFIX = "kitchen-stock-closing-finished";
 const CUSTOM_CLOSING_CHECKLIST_ITEMS_KEY = "kitchen-stock-custom-closing-checklist-items";
+const OPENING_CHECKLIST_KEY_PREFIX = "kitchen-stock-opening-checklist";
+const OPENING_FINISHED_KEY_PREFIX = "kitchen-stock-opening-finished";
 
 const normalizeNumberInput = (value: string) =>
   value
@@ -1043,6 +1052,13 @@ function AdminApp({ onLogout }: { onLogout: () => void }) {
   const [closingChecklist, setClosingChecklist] = useState<Record<string, boolean>>({});
   const [closingFinished, setClosingFinished] = useState(false);
   const [closingReports, setClosingReports] = useState<ClosingReport[]>([]);
+  const [openingChecklist, setOpeningChecklist] = useState<Record<string, boolean>>({});
+  const [openingFinished, setOpeningFinished] = useState(false);
+  const [openingReports, setOpeningReports] = useState<OpeningReport[]>([]);
+  const [customOpeningChecklistItems, setCustomOpeningChecklistItems] = useState<
+    OpeningChecklistItem[]
+  >([]);
+  const [newOpeningChecklistItem, setNewOpeningChecklistItem] = useState("");
   const [customClosingChecklistItems, setCustomClosingChecklistItems] = useState<
     { key: string; label: string }[]
   >([]);
@@ -1059,6 +1075,9 @@ function AdminApp({ onLogout }: { onLogout: () => void }) {
   const [orderQuantity, setOrderQuantity] = useState("1");
   const [openOrderSections, setOpenOrderSections] = useState<Record<string, boolean>>({});
   const [openClosingSections, setOpenClosingSections] = useState<Record<string, boolean>>({
+    checklist: true,
+  });
+  const [openOpeningSections, setOpenOpeningSections] = useState<Record<string, boolean>>({
     checklist: true,
   });
   const [menuFormOpen, setMenuFormOpen] = useState(false);
@@ -1088,7 +1107,14 @@ const [pendingStockCorrection, setPendingStockCorrection] = useState<{
 } | null>(null);
 const [customStockCorrectionReason, setCustomStockCorrectionReason] = useState("");
 const [activeTab, setActiveTab] = useState<
-  "inventory" | "low-stock" | "waste" | "menu" | "prep" | "orders" | "closing"
+  | "inventory"
+  | "low-stock"
+  | "waste"
+  | "menu"
+  | "prep"
+  | "orders"
+  | "opening"
+  | "closing"
 >("inventory");
 
 
@@ -1229,6 +1255,95 @@ const cancelEdit = () => {
     return `${CLOSING_FINISHED_KEY_PREFIX}:${dateKey}`;
   };
 
+  const getOpeningChecklistKey = () =>
+    `${OPENING_CHECKLIST_KEY_PREFIX}:${getBusinessDateKey()}`;
+
+  const getOpeningFinishedKey = () =>
+    `${OPENING_FINISHED_KEY_PREFIX}:${getBusinessDateKey()}`;
+
+  const loadOpeningChecklist = () => {
+    try {
+      const raw = window.localStorage.getItem(getOpeningChecklistKey());
+      setOpeningChecklist(raw ? JSON.parse(raw) : {});
+      setOpeningFinished(
+        window.localStorage.getItem(getOpeningFinishedKey()) === "true"
+      );
+    } catch {
+      setOpeningChecklist({});
+      setOpeningFinished(false);
+    }
+  };
+
+  const loadCustomOpeningChecklistItems = async () => {
+    try {
+      const items = await fetchOpeningChecklistItems();
+      setCustomOpeningChecklistItems(items);
+    } catch (e) {
+      setCustomOpeningChecklistItems([]);
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const updateOpeningChecklist = (key: string, checked: boolean) => {
+    setOpeningChecklist((prev) => {
+      const next = { ...prev, [key]: checked };
+      window.localStorage.setItem(getOpeningChecklistKey(), JSON.stringify(next));
+      if (!checked) {
+        window.localStorage.removeItem(getOpeningFinishedKey());
+        setOpeningFinished(false);
+      }
+      return next;
+    });
+  };
+
+  const addCustomOpeningChecklistItem = async () => {
+    const label = newOpeningChecklistItem.trim();
+    if (!label) {
+      setError("追加するチェック項目を入力してください");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
+      const item = await createOpeningChecklistItem(label);
+      setCustomOpeningChecklistItems((prev) => [...prev, item]);
+      setNewOpeningChecklistItem("");
+      window.localStorage.removeItem(getOpeningFinishedKey());
+      setOpeningFinished(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const deleteCustomOpeningChecklistItem = async (id: string) => {
+    if (!confirm("このチェック項目を削除しますか？")) return;
+
+    try {
+      setLoading(true);
+      setError(null);
+      await deleteOpeningChecklistItem(id);
+      setCustomOpeningChecklistItems((prev) =>
+        prev.filter((item) => item.id !== id)
+      );
+      const key = `custom:${id}`;
+      setOpeningChecklist((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        window.localStorage.setItem(getOpeningChecklistKey(), JSON.stringify(next));
+        return next;
+      });
+      window.localStorage.removeItem(getOpeningFinishedKey());
+      setOpeningFinished(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const loadClosingChecklist = () => {
     try {
       const raw = window.localStorage.getItem(getClosingChecklistKey());
@@ -1289,6 +1404,36 @@ const cancelEdit = () => {
       window.localStorage.setItem(getClosingFinishedKey(), "true");
       setClosingFinished(true);
       setClosingReports((prev) => [
+        report,
+        ...prev.filter((item) => item.business_date !== report.business_date),
+      ]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const finishOpeningWork = async () => {
+    if (!confirm("開店準備を完了しますか？")) return;
+
+    try {
+      setLoading(true);
+      setError(null);
+      const report = await createOpeningReport({
+        business_date: getBusinessDateKey(),
+        checklist_total: openingChecklistItems.length,
+        checklist_completed: completedOpeningChecklistCount,
+        checklist_items: openingChecklistItems.map((item) => ({
+          key: item.key,
+          label: item.label,
+          checked: Boolean(openingChecklist[item.key]),
+        })),
+      });
+
+      window.localStorage.setItem(getOpeningFinishedKey(), "true");
+      setOpeningFinished(true);
+      setOpeningReports((prev) => [
         report,
         ...prev.filter((item) => item.business_date !== report.business_date),
       ]);
@@ -1374,6 +1519,20 @@ const cancelEdit = () => {
       setClosingReports(closingReportData);
     } catch (e) {
       setDailyStockMovements([]);
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadOpeningCheckData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const reports = await fetchOpeningReports();
+      setOpeningReports(reports);
+    } catch (e) {
+      setOpeningReports([]);
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
@@ -1596,6 +1755,11 @@ const cancelEdit = () => {
       loadClosingCheckData();
       loadClosingChecklist();
       loadCustomClosingChecklistItems();
+    }
+    if (activeTab === "opening") {
+      loadOpeningCheckData();
+      loadOpeningChecklist();
+      loadCustomOpeningChecklistItems();
     }
     if (activeTab === "orders") {
       const intervalId = window.setInterval(loadOrderData, 5000);
@@ -1867,6 +2031,11 @@ const cancelEdit = () => {
   const toggleClosingSection = (section: string) => {
     setOpenClosingSections((prev) => ({ ...prev, [section]: !prev[section] }));
   };
+  const isOpeningSectionOpen = (section: string) =>
+    Boolean(openOpeningSections[section]);
+  const toggleOpeningSection = (section: string) => {
+    setOpenOpeningSections((prev) => ({ ...prev, [section]: !prev[section] }));
+  };
   const itemsById = new Map(items.map((item) => [item.id, item]));
   const todayRange = getTodayRange();
   const isTodayDate = (value: string | null) => {
@@ -1998,6 +2167,46 @@ const cancelEdit = () => {
   const allClosingChecklistDone =
     closingChecklistItems.length > 0 &&
     completedClosingChecklistCount === closingChecklistItems.length;
+  const openingChecklistItems = [
+    {
+      key: "staff-ready",
+      label: "スタッフの出勤・持ち場を確認",
+      warning: null,
+    },
+    {
+      key: "register-ready",
+      label: "レジ・釣り銭を確認",
+      warning: null,
+    },
+    {
+      key: "reservation-check",
+      label: "予約・来店予定を確認",
+      warning: null,
+    },
+    {
+      key: "stock-check",
+      label: "開店前の在庫を確認",
+      warning: null,
+    },
+    {
+      key: "prep-check",
+      label: "仕込み状況を確認",
+      warning: null,
+    },
+    ...customOpeningChecklistItems.map((item) => ({
+      key: `custom:${item.id}`,
+      label: item.label,
+      id: item.id,
+      warning: null,
+      custom: true,
+    })),
+  ];
+  const completedOpeningChecklistCount = openingChecklistItems.filter(
+    (item) => openingChecklist[item.key]
+  ).length;
+  const allOpeningChecklistDone =
+    openingChecklistItems.length > 0 &&
+    completedOpeningChecklistCount === openingChecklistItems.length;
   const formatOrderDate = (value: string | null) =>
     value ? new Date(value).toLocaleString() : "";
 
@@ -2610,6 +2819,12 @@ const orderSectionHeaderStyle: React.CSSProperties = {
         }}
       >
         <button
+          onClick={() => setActiveTab("opening")}
+          style={tabButtonStyle(activeTab === "opening")}
+        >
+          開店チェック
+        </button>
+        <button
           onClick={() => setActiveTab("inventory")}
           style={tabButtonStyle(activeTab === "inventory")}
         >
@@ -2657,6 +2872,206 @@ const orderSectionHeaderStyle: React.CSSProperties = {
         <p style={{ color: "red", whiteSpace: "pre-wrap" }}>
           エラー: {error}
         </p>
+      )}
+
+      {activeTab === "opening" && (
+        <section style={sectionStyle}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 12,
+              alignItems: "center",
+              flexWrap: "wrap",
+              marginBottom: 12,
+            }}
+          >
+            <div>
+              <h2 style={{ margin: "0 0 4px" }}>開店チェック</h2>
+              <p style={{ margin: 0, color: "#4b5563" }}>
+                開店前の確認項目をチェックします。
+              </p>
+            </div>
+            <button onClick={loadOpeningCheckData} disabled={loading}>
+              更新
+            </button>
+          </div>
+
+          <section>
+            <button
+              type="button"
+              onClick={() => toggleOpeningSection("checklist")}
+              style={orderSectionHeaderStyle}
+            >
+              <span>
+                {isOpeningSectionOpen("checklist") ? "▼" : "▶"} 開店前チェックリスト
+              </span>
+              <strong>
+                {completedOpeningChecklistCount}/{openingChecklistItems.length}
+              </strong>
+            </button>
+            {isOpeningSectionOpen("checklist") && (
+              <div
+                style={{
+                  display: "grid",
+                  gap: 8,
+                  marginTop: 8,
+                  padding: 12,
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 8,
+                  background: "#fff",
+                }}
+              >
+                {openingChecklistItems.map((item) => (
+                  <div
+                    key={item.key}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 8,
+                      alignItems: "flex-start",
+                      padding: 8,
+                      border: "1px solid #f3f4f6",
+                      borderRadius: 6,
+                      background: openingChecklist[item.key] ? "#f0fdf4" : "#fff",
+                    }}
+                  >
+                    <label
+                      style={{
+                        display: "flex",
+                        gap: 8,
+                        alignItems: "flex-start",
+                        flex: "1 1 auto",
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={Boolean(openingChecklist[item.key])}
+                        onChange={(e) =>
+                          updateOpeningChecklist(item.key, e.target.checked)
+                        }
+                        style={{ marginTop: 3 }}
+                      />
+                      <span>
+                        <strong>{item.label}</strong>
+                      </span>
+                    </label>
+                    {"custom" in item && item.custom && (
+                      <button
+                        type="button"
+                        onClick={() => deleteCustomOpeningChecklistItem(item.id)}
+                        disabled={loading}
+                      >
+                        削除
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    flexWrap: "wrap",
+                    alignItems: "center",
+                    paddingTop: 4,
+                  }}
+                >
+                  <input
+                    value={newOpeningChecklistItem}
+                    onChange={(e) => setNewOpeningChecklistItem(e.target.value)}
+                    placeholder="チェック項目を追加"
+                    style={{ ...inputStyle, flex: "1 1 240px" }}
+                  />
+                  <button
+                    type="button"
+                    onClick={addCustomOpeningChecklistItem}
+                    disabled={loading}
+                  >
+                    追加
+                  </button>
+                </div>
+                {allOpeningChecklistDone && !openingFinished && (
+                  <button
+                    type="button"
+                    onClick={finishOpeningWork}
+                    disabled={loading}
+                    style={{ marginTop: 4 }}
+                  >
+                    開店準備を完了する
+                  </button>
+                )}
+                {openingFinished && (
+                  <p
+                    style={{
+                      margin: "4px 0 0",
+                      padding: 10,
+                      borderRadius: 6,
+                      background: "#f0fdf4",
+                      color: "#166534",
+                      fontWeight: 700,
+                    }}
+                  >
+                    本日もよろしくお願いします。
+                  </p>
+                )}
+              </div>
+            )}
+          </section>
+
+          <section style={{ marginTop: 16 }}>
+            <button
+              type="button"
+              onClick={() => toggleOpeningSection("history")}
+              style={orderSectionHeaderStyle}
+            >
+              <span>
+                {isOpeningSectionOpen("history") ? "▼" : "▶"} 開店履歴
+              </span>
+              <strong>{openingReports.length}件</strong>
+            </button>
+            {isOpeningSectionOpen("history") && (
+              <div
+                style={{
+                  display: "grid",
+                  gap: 8,
+                  marginTop: 8,
+                  padding: 12,
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 8,
+                  background: "#fff",
+                }}
+              >
+                {openingReports.length === 0 ? (
+                  <p style={{ margin: 0, color: "#6b7280" }}>
+                    開店履歴はまだありません
+                  </p>
+                ) : (
+                  openingReports.map((report) => (
+                    <div
+                      key={report.id}
+                      style={{
+                        border: "1px solid #f3f4f6",
+                        borderRadius: 6,
+                        padding: 8,
+                      }}
+                    >
+                      <strong>
+                        {report.business_date} /{" "}
+                        {new Date(report.completed_at).toLocaleTimeString([], {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </strong>
+                      <p style={{ margin: "4px 0 0", color: "#4b5563" }}>
+                        チェック {report.checklist_completed}/{report.checklist_total}
+                      </p>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </section>
+        </section>
       )}
 
       {activeTab === "low-stock" && (

@@ -81,6 +81,24 @@ export type ClosingReport = {
   created_at: string;
 };
 
+export type OpeningReport = {
+  id: string;
+  business_date: string;
+  completed_at: string;
+  checklist_total: number;
+  checklist_completed: number;
+  checklist_items: { key: string; label: string; checked: boolean }[];
+  created_at: string;
+};
+
+export type OpeningChecklistItem = {
+  id: string;
+  label: string;
+  sort_order: number;
+  is_active: boolean;
+  created_at: string;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!API) throw new Error("VITE_API_URL が未設定です");
 
@@ -195,6 +213,48 @@ export async function createClosingReport(params: {
   checklist_items: { key: string; label: string; checked: boolean }[];
 }): Promise<ClosingReport> {
   return request<ClosingReport>("/closing-reports", {
+    method: "POST",
+    headers: adminHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(params),
+  });
+}
+
+export async function fetchOpeningReports(): Promise<OpeningReport[]> {
+  return request<OpeningReport[]>("/opening-reports", {
+    headers: adminHeaders(),
+  });
+}
+
+export async function fetchOpeningChecklistItems(): Promise<OpeningChecklistItem[]> {
+  return request<OpeningChecklistItem[]>("/opening-checklist-items", {
+    headers: adminHeaders(),
+  });
+}
+
+export async function createOpeningChecklistItem(
+  label: string
+): Promise<OpeningChecklistItem> {
+  return request<OpeningChecklistItem>("/opening-checklist-items", {
+    method: "POST",
+    headers: adminHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ label }),
+  });
+}
+
+export async function deleteOpeningChecklistItem(id: string): Promise<void> {
+  await request(`/opening-checklist-items/${id}`, {
+    method: "DELETE",
+    headers: adminHeaders(),
+  });
+}
+
+export async function createOpeningReport(params: {
+  business_date: string;
+  checklist_total: number;
+  checklist_completed: number;
+  checklist_items: { key: string; label: string; checked: boolean }[];
+}): Promise<OpeningReport> {
+  return request<OpeningReport>("/opening-reports", {
     method: "POST",
     headers: adminHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(params),
