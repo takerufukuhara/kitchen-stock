@@ -66,6 +66,14 @@ const requireAdmin: express.RequestHandler = (req, res, next) => {
   next();
 };
 
+const isAdminRequest = (req: express.Request) => {
+  const authHeader = req.header("Authorization");
+  const token = authHeader?.startsWith("Bearer ")
+    ? authHeader.slice("Bearer ".length)
+    : "";
+  return Boolean(token && token === adminToken);
+};
+
 app.get("/health", (_req, res) => {
   res.json({ ok: true });
 });
@@ -885,6 +893,11 @@ app.get("/customer-groups", async (_req, res) => {
 
 app.post("/customer-groups", async (req, res) => {
   try {
+    const settings = await getAppSettings();
+    if (settings.order_start_mode === "staff" && !isAdminRequest(req)) {
+      return res.status(403).json({ error: "スタッフが注文開始する設定です" });
+    }
+
     const tables = await getActiveTables();
     const tableId =
       typeof req.body?.table_id === "string" ? req.body.table_id.trim() : "";

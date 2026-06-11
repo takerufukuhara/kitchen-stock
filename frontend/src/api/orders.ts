@@ -351,13 +351,16 @@ export async function deleteTable(id: string): Promise<void> {
 }
 
 export async function createCustomerGroup(
-  params: string | { label?: string; table_id?: string }
+  params: string | { label?: string; table_id?: string },
+  options?: { admin?: boolean }
 ): Promise<CustomerGroup> {
   const body = typeof params === "string" ? { label: params } : params;
 
   return request<CustomerGroup>("/customer-groups", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: options?.admin
+      ? adminHeaders({ "Content-Type": "application/json" })
+      : { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
 }

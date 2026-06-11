@@ -417,7 +417,11 @@ function CustomerOrderPage({ tableId }: { tableId: string }) {
       setError(null);
       const label = selectedGroupLabel || customerGroupOptions[0]?.label || "";
       const activeGroup = selectedGroupOption?.active_group;
-      if (!activeGroup) {
+      if (!selectedGroupOption?.table_id) {
+        setError("この卓は現在利用できません");
+        return;
+      }
+      if (!activeGroup && orderStartMode === "staff") {
         setError("スタッフが注文開始するまでお待ちください");
         return;
       }
@@ -425,7 +429,7 @@ function CustomerOrderPage({ tableId }: { tableId: string }) {
         activeGroup ??
         (await createCustomerGroup({
           label,
-          table_id: selectedGroupOption?.table_id ?? undefined,
+          table_id: selectedGroupOption.table_id,
         }));
       window.localStorage.setItem(CUSTOMER_GROUP_ID_KEY, group.id);
       window.localStorage.removeItem(CUSTOMER_CHECKOUT_REQUESTED_KEY);
@@ -680,7 +684,9 @@ function CustomerOrderPage({ tableId }: { tableId: string }) {
   const selectedGroupOption = customerGroupOptions.find(
     (option) => option.table_id === tableId
   );
-  const canStartCustomerGroup = Boolean(selectedGroupOption?.active_group);
+  const canStartCustomerGroup =
+    Boolean(selectedGroupOption?.active_group) ||
+    (orderStartMode === "customer" && Boolean(selectedGroupOption?.table_id));
   const getCustomerMenuCategoryLabel = (menu: MenuItem) =>
     menu.category?.trim() || "未分類";
   const customerMenuCategoryGroups = Array.from(
@@ -936,13 +942,15 @@ function CustomerOrderPage({ tableId }: { tableId: string }) {
                 >
                   <strong>{selectedGroupOption?.label ?? "この卓"}</strong>
                   <span style={{ color: "#6b7280", fontSize: 13 }}>
-                    {selectedGroupOption
-                      ? orderStartMode === "customer"
-                        ? "お客様開始の設定を読み込みました"
-                        : "スタッフが注文開始するまでお待ちください"
-                      : "この卓は現在利用できません"}
+                    {!selectedGroupOption
+                      ? "この卓は現在利用できません"
+                      : selectedGroupOption.active_group
+                        ? "注文画面へ進めます"
+                        : orderStartMode === "customer"
+                          ? "人数入力へ進んで注文を開始できます"
+                          : "スタッフが注文開始するまでお待ちください"}
                   </span>
-                  {selectedGroupOption?.active_group && (
+                  {canStartCustomerGroup && (
                     <button
                       type="button"
                       onClick={startCustomerGroup}
@@ -952,7 +960,11 @@ function CustomerOrderPage({ tableId }: { tableId: string }) {
                         opacity: creatingGroup || !canStartCustomerGroup ? 0.7 : 1,
                       }}
                     >
-                      {creatingGroup ? "確認中..." : "注文画面へ"}
+                      {creatingGroup
+                        ? "確認中..."
+                        : selectedGroupOption?.active_group
+                          ? "注文画面へ"
+                          : "注文開始"}
                     </button>
                   )}
                 </div>
@@ -1150,9 +1162,11 @@ function CustomerOrderPage({ tableId }: { tableId: string }) {
 
         {!checkoutRequested && !customerGroup ? (
           <p style={{ margin: 0, color: "#4b5563" }}>
-            {orderStartMode === "customer"
-              ? "お客様開始の設定を読み込みました。"
-              : "スタッフが注文開始するまでお待ちください。"}
+            {!selectedGroupOption
+              ? "この卓は現在利用できません。"
+              : orderStartMode === "customer"
+                ? "注文開始ボタンから人数入力へ進めます。"
+                : "スタッフが注文開始するまでお待ちください。"}
           </p>
         ) : !checkoutRequested && customerGroup?.party_size && !loading && menuItems.length === 0 ? (
           <p>注文できるメニューはまだありません</p>
@@ -1505,7 +1519,10 @@ const cancelEdit = () => {
     try {
       setStartingTableId(table.id);
       setError(null);
-      await createCustomerGroup({ table_id: table.id, label: table.label });
+      await createCustomerGroup(
+        { table_id: table.id, label: table.label },
+        { admin: true }
+      );
       await loadTableData();
       await loadOrderData();
     } catch (e) {
@@ -1521,10 +1538,13 @@ const cancelEdit = () => {
     try {
       setStartingTableId(option.table_id);
       setError(null);
-      await createCustomerGroup({
-        table_id: option.table_id,
-        label: option.label,
-      });
+      await createCustomerGroup(
+        {
+          table_id: option.table_id,
+          label: option.label,
+        },
+        { admin: true }
+      );
       await loadOrderData();
       await loadTableData();
     } catch (e) {
