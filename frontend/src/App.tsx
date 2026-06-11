@@ -268,6 +268,7 @@ function CustomerOrderPage({ tableId }: { tableId: string }) {
   const [customerGroup, setCustomerGroup] = useState<CustomerGroup | null>(null);
   const [customerGroupOptions, setCustomerGroupOptions] = useState<CustomerGroupOption[]>([]);
   const [selectedGroupLabel, setSelectedGroupLabel] = useState("");
+  const [orderStartMode, setOrderStartMode] = useState<OrderStartMode>("staff");
   const [creatingGroup, setCreatingGroup] = useState(false);
   const [partySizeInput, setPartySizeInput] = useState("");
   const [savingPartySize, setSavingPartySize] = useState(false);
@@ -337,8 +338,12 @@ function CustomerOrderPage({ tableId }: { tableId: string }) {
       try {
         setLoading(true);
         setError(null);
-        const data = await fetchPublicMenuItems();
+        const [data, settings] = await Promise.all([
+          fetchPublicMenuItems(),
+          fetchAppSettings(),
+        ]);
         setMenuItems(data);
+        setOrderStartMode(settings.order_start_mode);
         setQuantityByMenuId((prev) => {
           const next = { ...prev };
           for (const menu of data) {
@@ -932,7 +937,9 @@ function CustomerOrderPage({ tableId }: { tableId: string }) {
                   <strong>{selectedGroupOption?.label ?? "この卓"}</strong>
                   <span style={{ color: "#6b7280", fontSize: 13 }}>
                     {selectedGroupOption
-                      ? "スタッフが注文開始するまでお待ちください"
+                      ? orderStartMode === "customer"
+                        ? "お客様開始の設定を読み込みました"
+                        : "スタッフが注文開始するまでお待ちください"
                       : "この卓は現在利用できません"}
                   </span>
                   {selectedGroupOption?.active_group && (
@@ -1143,7 +1150,9 @@ function CustomerOrderPage({ tableId }: { tableId: string }) {
 
         {!checkoutRequested && !customerGroup ? (
           <p style={{ margin: 0, color: "#4b5563" }}>
-            スタッフが注文開始するまでお待ちください。
+            {orderStartMode === "customer"
+              ? "お客様開始の設定を読み込みました。"
+              : "スタッフが注文開始するまでお待ちください。"}
           </p>
         ) : !checkoutRequested && customerGroup?.party_size && !loading && menuItems.length === 0 ? (
           <p>注文できるメニューはまだありません</p>
