@@ -38,6 +38,7 @@ import {
   getJoinedName,
   requestCustomerGroupCheckout,
   startCookingOrder,
+  updateCustomerGroupPartySize,
   updateTable,
   updateMenuItem,
   type CustomerGroup,
@@ -265,6 +266,8 @@ function CustomerOrderPage({ tableId }: { tableId: string }) {
   const [customerGroupOptions, setCustomerGroupOptions] = useState<CustomerGroupOption[]>([]);
   const [selectedGroupLabel, setSelectedGroupLabel] = useState("");
   const [creatingGroup, setCreatingGroup] = useState(false);
+  const [partySizeInput, setPartySizeInput] = useState("");
+  const [savingPartySize, setSavingPartySize] = useState(false);
   const [customerOrders, setCustomerOrders] = useState<Order[]>([]);
   const [customerOrderHistory, setCustomerOrderHistory] = useState<Order[]>([]);
   const [customerOrdersOpen, setCustomerOrdersOpen] = useState(false);
@@ -382,6 +385,11 @@ function CustomerOrderPage({ tableId }: { tableId: string }) {
           window.localStorage.removeItem(CUSTOMER_CHECKOUT_REQUESTED_KEY);
           setCustomerGroup(tableOption.active_group);
           setSelectedGroupLabel(tableOption.label);
+          setPartySizeInput(
+            tableOption.active_group.party_size
+              ? String(tableOption.active_group.party_size)
+              : ""
+          );
           setCheckoutRequested(false);
         } else {
           resetCustomerSession();
@@ -417,6 +425,7 @@ function CustomerOrderPage({ tableId }: { tableId: string }) {
       setCheckoutRequested(false);
       setOrderList([]);
       setSelectedGroupLabel(group.label ?? "");
+      setPartySizeInput(group.party_size ? String(group.party_size) : "");
       await refreshCustomerGroupOptions();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -437,6 +446,7 @@ function CustomerOrderPage({ tableId }: { tableId: string }) {
     setOrderListOpen(false);
     setOpenMenuCategory(null);
     setOrderList([]);
+    setPartySizeInput("");
     setCheckoutRequested(false);
   };
 
@@ -492,6 +502,7 @@ function CustomerOrderPage({ tableId }: { tableId: string }) {
         }
 
         setCustomerGroup(group);
+        setPartySizeInput(group.party_size ? String(group.party_size) : "");
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       }
@@ -499,6 +510,28 @@ function CustomerOrderPage({ tableId }: { tableId: string }) {
 
     return () => window.clearInterval(intervalId);
   }, [customerGroup]);
+
+  const savePartySize = async () => {
+    if (!customerGroup) return;
+
+    const partySize = parseNumberInput(partySizeInput);
+    if (!Number.isInteger(partySize) || partySize < 1 || partySize > 99) {
+      setError("人数は1〜99の整数で入力してください");
+      return;
+    }
+
+    try {
+      setSavingPartySize(true);
+      setError(null);
+      const group = await updateCustomerGroupPartySize(customerGroup.id, partySize);
+      setCustomerGroup(group);
+      setPartySizeInput(String(group.party_size ?? partySize));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingPartySize(false);
+    }
+  };
 
   useEffect(() => {
     if (!activeStaffCallId) return;
@@ -715,7 +748,49 @@ function CustomerOrderPage({ tableId }: { tableId: string }) {
             </p>
           </>
         )}
-        {!checkoutRequested && customerGroup && menuItems.length > 0 && (
+        {!checkoutRequested && customerGroup && !customerGroup.party_size && (
+          <section
+            style={{
+              display: "grid",
+              gap: 10,
+              marginBottom: 12,
+              padding: 12,
+              border: "1px solid #e5e7eb",
+              borderRadius: 8,
+              background: "#f9fafb",
+            }}
+          >
+            <strong>{customerGroup.label ?? "この卓"}の人数を入力してください</strong>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "minmax(0, 1fr) 120px",
+                gap: 8,
+              }}
+            >
+              <input
+                value={partySizeInput}
+                onChange={(e) => setPartySizeInput(e.target.value)}
+                inputMode="numeric"
+                placeholder="例: 2"
+                aria-label="お客様の人数"
+                style={inputStyle}
+              />
+              <button
+                type="button"
+                onClick={savePartySize}
+                disabled={savingPartySize}
+                style={{
+                  ...buttonStyle,
+                  opacity: savingPartySize ? 0.7 : 1,
+                }}
+              >
+                {savingPartySize ? "保存中..." : "決定"}
+              </button>
+            </div>
+          </section>
+        )}
+        {!checkoutRequested && customerGroup?.party_size && menuItems.length > 0 && (
           <div style={{ display: "grid", gap: 12, marginBottom: 12 }}>
             <div
               style={{
@@ -807,7 +882,7 @@ function CustomerOrderPage({ tableId }: { tableId: string }) {
           </div>
         )}
 
-        {!checkoutRequested && (
+        {!checkoutRequested && (!customerGroup || customerGroup.party_size) && (
           <div
             className="customer-action-bar"
             style={{
@@ -1067,7 +1142,7 @@ function CustomerOrderPage({ tableId }: { tableId: string }) {
           <p style={{ margin: 0, color: "#4b5563" }}>
             スタッフが注文開始するまでお待ちください。
           </p>
-        ) : !checkoutRequested && customerGroup && !loading && menuItems.length === 0 ? (
+        ) : !checkoutRequested && customerGroup?.party_size && !loading && menuItems.length === 0 ? (
           <p>注文できるメニューはまだありません</p>
         ) : null}
       </main>
@@ -3698,7 +3773,11 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                           {activeGroup?.checkout_requested_at
                             ? "会計希望あり"
                             : activeGroup
-                              ? "注文中"
+                              ? `注文中 / ${
+                                  activeGroup.party_size
+                                    ? `${activeGroup.party_size}名`
+                                    : "人数未入力"
+                                }`
                               : "空席"}
                         </span>
                         <div
@@ -3857,6 +3936,11 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                     ) : (
                       <span style={{ fontSize: 13, color: "#6b7280" }}>
                         空席
+                      </span>
+                    )}
+                    {group && (
+                      <span style={{ fontSize: 13, color: "#4b5563" }}>
+                        {group.party_size ? `${group.party_size}名` : "人数未入力"}
                       </span>
                     )}
                     {group ? (

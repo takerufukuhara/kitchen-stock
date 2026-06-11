@@ -701,7 +701,7 @@ app.get("/orders", requireAdmin, async (_req, res) => {
   try {
     const { data, error } = await supabase
       .from("orders")
-      .select("id,menu_item_id,customer_group_id,quantity,status,created_at,completed_at,cancelled_at,cancel_confirmed_at,staff_called_at,staff_call_confirmed_at,menu_items(name),customer_groups(label,table_id,closed_at)")
+      .select("id,menu_item_id,customer_group_id,quantity,status,created_at,completed_at,cancelled_at,cancel_confirmed_at,staff_called_at,staff_call_confirmed_at,menu_items(name),customer_groups(label,table_id,party_size,closed_at)")
       .order("created_at", { ascending: false });
 
     if (error) return res.status(500).json({ error: error.message });
@@ -715,7 +715,7 @@ app.get("/staff-calls", requireAdmin, async (_req, res) => {
   try {
     const { data, error } = await supabase
       .from("staff_calls")
-      .select("id,customer_group_id,created_at,confirmed_at,cancelled_at,customer_groups(label,table_id)")
+      .select("id,customer_group_id,created_at,confirmed_at,cancelled_at,customer_groups(label,table_id,party_size)")
       .is("confirmed_at", null)
       .is("cancelled_at", null)
       .order("created_at", { ascending: false });
@@ -731,7 +731,7 @@ app.get("/staff-calls/:id", async (req, res) => {
   try {
     const { data, error } = await supabase
       .from("staff_calls")
-      .select("id,customer_group_id,created_at,confirmed_at,cancelled_at,customer_groups(label,table_id)")
+      .select("id,customer_group_id,created_at,confirmed_at,cancelled_at,customer_groups(label,table_id,party_size)")
       .eq("id", req.params.id)
       .single();
 
@@ -807,7 +807,7 @@ app.get("/customer-groups", async (_req, res) => {
 
     const { data, error } = await supabase
       .from("customer_groups")
-      .select("id,label,table_id,created_at,closed_at,checkout_requested_at")
+      .select("id,label,table_id,party_size,created_at,closed_at,checkout_requested_at")
       .in("table_id", tableIds)
       .is("closed_at", null)
       .order("created_at", { ascending: false });
@@ -855,7 +855,7 @@ app.post("/customer-groups", async (req, res) => {
 
     const { data: activeGroup, error: activeGroupError } = await supabase
       .from("customer_groups")
-      .select("id,label,table_id,created_at,closed_at,checkout_requested_at")
+      .select("id,label,table_id,party_size,created_at,closed_at,checkout_requested_at")
       .eq("table_id", table.id)
       .is("closed_at", null)
       .maybeSingle();
@@ -868,7 +868,7 @@ app.post("/customer-groups", async (req, res) => {
     const { data, error } = await supabase
       .from("customer_groups")
       .insert([{ label, table_id: table.id }])
-      .select("id,label,table_id,created_at,closed_at,checkout_requested_at")
+      .select("id,label,table_id,party_size,created_at,closed_at,checkout_requested_at")
       .single();
 
     if (error) return res.status(500).json({ error: error.message });
@@ -898,7 +898,7 @@ app.patch("/customer-groups/:id/checkout", requireAdmin, async (req, res) => {
       .from("customer_groups")
       .update({ closed_at: new Date().toISOString() })
       .eq("id", req.params.id)
-      .select("id,label,table_id,created_at,closed_at,checkout_requested_at")
+      .select("id,label,table_id,party_size,created_at,closed_at,checkout_requested_at")
       .single();
 
     if (error) return res.status(500).json({ error: error.message });
@@ -915,7 +915,7 @@ app.patch("/customer-groups/:id/request-checkout", async (req, res) => {
       .update({ checkout_requested_at: new Date().toISOString() })
       .eq("id", req.params.id)
       .is("closed_at", null)
-      .select("id,label,table_id,created_at,closed_at,checkout_requested_at")
+      .select("id,label,table_id,party_size,created_at,closed_at,checkout_requested_at")
       .single();
 
     if (error) return res.status(500).json({ error: error.message });
@@ -926,11 +926,34 @@ app.patch("/customer-groups/:id/request-checkout", async (req, res) => {
   }
 });
 
+app.patch("/customer-groups/:id/party-size", async (req, res) => {
+  try {
+    const partySize = Number(req.body?.party_size);
+    if (!Number.isInteger(partySize) || partySize < 1 || partySize > 99) {
+      return res.status(400).json({ error: "人数は1〜99の整数で入力してください" });
+    }
+
+    const { data, error } = await supabase
+      .from("customer_groups")
+      .update({ party_size: partySize })
+      .eq("id", req.params.id)
+      .is("closed_at", null)
+      .select("id,label,table_id,party_size,created_at,closed_at,checkout_requested_at")
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    if (!data) return res.status(404).json({ error: "注文中の卓が見つかりません" });
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
 app.get("/customer-groups/:id", async (req, res) => {
   try {
     const { data, error } = await supabase
       .from("customer_groups")
-      .select("id,label,table_id,created_at,closed_at,checkout_requested_at")
+      .select("id,label,table_id,party_size,created_at,closed_at,checkout_requested_at")
       .eq("id", req.params.id)
       .single();
 
@@ -975,7 +998,7 @@ app.get("/orders/:id/status", async (req, res) => {
   try {
     const { data, error } = await supabase
       .from("orders")
-      .select("id,menu_item_id,customer_group_id,quantity,status,created_at,completed_at,cancelled_at,cancel_confirmed_at,staff_called_at,staff_call_confirmed_at,menu_items(name),customer_groups(label,table_id,closed_at)")
+      .select("id,menu_item_id,customer_group_id,quantity,status,created_at,completed_at,cancelled_at,cancel_confirmed_at,staff_called_at,staff_call_confirmed_at,menu_items(name),customer_groups(label,table_id,party_size,closed_at)")
       .eq("id", req.params.id)
       .single();
 

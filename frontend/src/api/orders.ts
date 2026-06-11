@@ -38,8 +38,18 @@ export type Order = {
   staff_call_confirmed_at: string | null;
   menu_items?: { name: string } | { name: string }[] | null;
   customer_groups?:
-    | { label: string | null; table_id?: string | null; closed_at?: string | null }
-    | { label: string | null; table_id?: string | null; closed_at?: string | null }[]
+    | {
+        label: string | null;
+        table_id?: string | null;
+        party_size?: number | null;
+        closed_at?: string | null;
+      }
+    | {
+        label: string | null;
+        table_id?: string | null;
+        party_size?: number | null;
+        closed_at?: string | null;
+      }[]
     | null;
 };
 
@@ -50,8 +60,8 @@ export type StaffCall = {
   confirmed_at: string | null;
   cancelled_at: string | null;
   customer_groups?:
-    | { label: string | null; table_id?: string | null }
-    | { label: string | null; table_id?: string | null }[]
+    | { label: string | null; table_id?: string | null; party_size?: number | null }
+    | { label: string | null; table_id?: string | null; party_size?: number | null }[]
     | null;
 };
 
@@ -59,6 +69,7 @@ export type CustomerGroup = {
   id: string;
   label: string | null;
   table_id: string | null;
+  party_size: number | null;
   created_at: string;
   closed_at: string | null;
   checkout_requested_at: string | null;
@@ -349,6 +360,17 @@ export async function checkoutCustomerGroup(id: string): Promise<CustomerGroup> 
 export async function requestCustomerGroupCheckout(id: string): Promise<CustomerGroup> {
   return request<CustomerGroup>(`/customer-groups/${id}/request-checkout`, {
     method: "PATCH",
+  });
+}
+
+export async function updateCustomerGroupPartySize(
+  id: string,
+  party_size: number
+): Promise<CustomerGroup> {
+  return request<CustomerGroup>(`/customer-groups/${id}/party-size`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ party_size }),
   });
 }
 
