@@ -880,6 +880,20 @@ app.post("/customer-groups", async (req, res) => {
 
 app.patch("/customer-groups/:id/checkout", requireAdmin, async (req, res) => {
   try {
+    const { data: group, error: groupError } = await supabase
+      .from("customer_groups")
+      .select("id,checkout_requested_at,closed_at")
+      .eq("id", req.params.id)
+      .maybeSingle();
+
+    if (groupError) return res.status(500).json({ error: groupError.message });
+    if (!group || group.closed_at) {
+      return res.status(404).json({ error: "注文中の卓が見つかりません" });
+    }
+    if (!group.checkout_requested_at) {
+      return res.status(400).json({ error: "お客様から会計希望が出ていません" });
+    }
+
     const { data, error } = await supabase
       .from("customer_groups")
       .update({ closed_at: new Date().toISOString() })
