@@ -22,11 +22,18 @@ const supabase = createClient(
 const adminPassword = process.env.ADMIN_PASSWORD;
 const adminToken =
   process.env.ADMIN_AUTH_TOKEN || crypto.randomBytes(32).toString("hex");
-const customerGroupLabels = process.env.CUSTOMER_GROUP_LABELS
-  ? process.env.CUSTOMER_GROUP_LABELS.split(",")
-      .map((label) => label.trim())
-      .filter(Boolean)
-  : ["テーブル1", "テーブル2", "テーブル3", "テーブル4", "テーブル5", "テーブル6"];
+
+const getActiveTableLabels = async () => {
+  const { data, error } = await supabase
+    .from("tables")
+    .select("label")
+    .eq("is_active", true)
+    .order("sort_order", { ascending: true })
+    .order("created_at", { ascending: true });
+
+  if (error) throw error;
+  return (data ?? []).map((table) => table.label).filter(Boolean);
+};
 
 const requireAdmin: express.RequestHandler = (req, res, next) => {
   const authHeader = req.header("Authorization");
@@ -59,6 +66,100 @@ app.post("/admin/login", async (req, res) => {
   }
 
   res.json({ token: adminToken });
+});
+
+app.get("/tables", requireAdmin, async (_req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("tables")
+      .select("id,label,sort_order,is_active,created_at,updated_at")
+      .eq("is_active", true)
+      .order("sort_order", { ascending: true })
+      .order("created_at", { ascending: true });
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data ?? []);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.post("/tables", requireAdmin, async (req, res) => {
+  try {
+    const label = String(req.body?.label ?? "").trim();
+    if (!label) {
+      return res.status(400).json({ error: "label は必須です" });
+    }
+
+    const { data: latest, error: latestError } = await supabase
+      .from("tables")
+      .select("sort_order")
+      .order("sort_order", { ascending: false })
+      .limit(1);
+
+    if (latestError) return res.status(500).json({ error: latestError.message });
+
+    const nextSortOrder = Number(latest?.[0]?.sort_order ?? 0) + 1;
+    const { data, error } = await supabase
+      .from("tables")
+      .insert({ label, sort_order: nextSortOrder, is_active: true })
+      .select("id,label,sort_order,is_active,created_at,updated_at")
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.status(201).json(data);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.patch("/tables/:id", requireAdmin, async (req, res) => {
+  try {
+    const label =
+      req.body?.label === undefined ? undefined : String(req.body.label).trim();
+    const sortOrder =
+      req.body?.sort_order === undefined ? undefined : Number(req.body.sort_order);
+
+    if (label !== undefined && !label) {
+      return res.status(400).json({ error: "label は空にできません" });
+    }
+    if (sortOrder !== undefined && !Number.isFinite(sortOrder)) {
+      return res.status(400).json({ error: "sort_order は数値にしてください" });
+    }
+
+    const payload: Record<string, unknown> = {
+      updated_at: new Date().toISOString(),
+    };
+    if (label !== undefined) payload.label = label;
+    if (sortOrder !== undefined) payload.sort_order = sortOrder;
+
+    const { data, error } = await supabase
+      .from("tables")
+      .update(payload)
+      .eq("id", req.params.id)
+      .eq("is_active", true)
+      .select("id,label,sort_order,is_active,created_at,updated_at")
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.delete("/tables/:id", requireAdmin, async (req, res) => {
+  try {
+    const { error } = await supabase
+      .from("tables")
+      .update({ is_active: false, updated_at: new Date().toISOString() })
+      .eq("id", req.params.id);
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.status(204).send();
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
 });
 
 app.get("/items", requireAdmin, async (_req, res) => {

@@ -65,6 +65,15 @@ export type CustomerGroupOption = {
   active_group: CustomerGroup | null;
 };
 
+export type DiningTable = {
+  id: string;
+  label: string;
+  sort_order: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string | null;
+};
+
 export type ClosingReport = {
   id: string;
   business_date: string;
@@ -270,6 +279,38 @@ export async function createOrder(params: {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(params),
+  });
+}
+
+export async function fetchTables(): Promise<DiningTable[]> {
+  return request<DiningTable[]>("/tables", {
+    headers: adminHeaders(),
+  });
+}
+
+export async function createTable(label: string): Promise<DiningTable> {
+  return request<DiningTable>("/tables", {
+    method: "POST",
+    headers: adminHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ label }),
+  });
+}
+
+export async function updateTable(
+  id: string,
+  params: { label?: string; sort_order?: number }
+): Promise<DiningTable> {
+  return request<DiningTable>(`/tables/${id}`, {
+    method: "PATCH",
+    headers: adminHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(params),
+  });
+}
+
+export async function deleteTable(id: string): Promise<void> {
+  await request(`/tables/${id}`, {
+    method: "DELETE",
+    headers: adminHeaders(),
   });
 }
 

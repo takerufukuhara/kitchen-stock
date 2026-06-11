@@ -14,7 +14,9 @@ import {
   createClosingReport,
   createOpeningChecklistItem,
   createOpeningReport,
+  createTable,
   deleteOpeningChecklistItem,
+  deleteTable,
   createStaffCall,
   createMenuItem,
   createOrder,
@@ -26,6 +28,7 @@ import {
   fetchClosingReports,
   fetchOpeningChecklistItems,
   fetchOpeningReports,
+  fetchTables,
   fetchMenuItems,
   fetchPublicMenuItems,
   fetchOrderStatus,
@@ -35,9 +38,11 @@ import {
   getJoinedName,
   requestCustomerGroupCheckout,
   startCookingOrder,
+  updateTable,
   updateMenuItem,
   type CustomerGroup,
   type CustomerGroupOption,
+  type DiningTable,
   type ClosingReport,
   type OpeningChecklistItem,
   type OpeningReport,
@@ -1051,6 +1056,11 @@ function AdminApp({ onLogout }: { onLogout: () => void }) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [staffCalls, setStaffCalls] = useState<StaffCall[]>([]);
   const [customerGroupOptions, setCustomerGroupOptions] = useState<CustomerGroupOption[]>([]);
+  const [tables, setTables] = useState<DiningTable[]>([]);
+  const [newTableLabel, setNewTableLabel] = useState("");
+  const [editingTableId, setEditingTableId] = useState<string | null>(null);
+  const [editingTableLabel, setEditingTableLabel] = useState("");
+  const [editingTableSortOrder, setEditingTableSortOrder] = useState("");
   const [closingChecklist, setClosingChecklist] = useState<Record<string, boolean>>({});
   const [closingFinished, setClosingFinished] = useState(false);
   const [closingReports, setClosingReports] = useState<ClosingReport[]>([]);
@@ -1116,6 +1126,7 @@ const [activeTab, setActiveTab] = useState<
   | "waste"
   | "menu"
   | "prep"
+  | "tables"
   | "orders"
   | "opening"
   | "closing"
@@ -1221,6 +1232,101 @@ const cancelEdit = () => {
       setOrders([]);
       setStaffCalls([]);
       setCustomerGroupOptions([]);
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadTableData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const tableData = await fetchTables();
+      setTables(tableData);
+    } catch (e) {
+      setTables([]);
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const addTable = async () => {
+    const label = newTableLabel.trim();
+    if (!label) {
+      setError("卓名を入力してください");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
+      const table = await createTable(label);
+      setTables((prev) => [...prev, table].sort((a, b) => a.sort_order - b.sort_order));
+      setNewTableLabel("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const startEditTable = (table: DiningTable) => {
+    setEditingTableId(table.id);
+    setEditingTableLabel(table.label);
+    setEditingTableSortOrder(String(table.sort_order));
+  };
+
+  const cancelEditTable = () => {
+    setEditingTableId(null);
+    setEditingTableLabel("");
+    setEditingTableSortOrder("");
+  };
+
+  const saveTable = async (id: string) => {
+    const label = editingTableLabel.trim();
+    const sortOrder = Number(editingTableSortOrder);
+
+    if (!label) {
+      setError("卓名を入力してください");
+      return;
+    }
+    if (!Number.isFinite(sortOrder)) {
+      setError("表示順は数値で入力してください");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
+      const table = await updateTable(id, {
+        label,
+        sort_order: sortOrder,
+      });
+      setTables((prev) =>
+        prev
+          .map((item) => (item.id === id ? table : item))
+          .sort((a, b) => a.sort_order - b.sort_order)
+      );
+      cancelEditTable();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const removeTable = async (id: string) => {
+    if (!confirm("この卓を削除しますか？")) return;
+
+    try {
+      setLoading(true);
+      setError(null);
+      await deleteTable(id);
+      setTables((prev) => prev.filter((table) => table.id !== id));
+      if (editingTableId === id) cancelEditTable();
+    } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
@@ -1822,6 +1928,9 @@ const cancelEdit = () => {
     }
     if (activeTab === "orders" || activeTab === "menu" || activeTab === "prep") {
       loadOrderData();
+    }
+    if (activeTab === "tables") {
+      loadTableData();
     }
     if (activeTab === "closing") {
       loadClosingCheckData();
@@ -2945,6 +3054,12 @@ const orderSectionHeaderStyle: React.CSSProperties = {
           仕込み管理
         </button>
         <button
+          onClick={() => setActiveTab("tables")}
+          style={tabButtonStyle(activeTab === "tables")}
+        >
+          卓管理
+        </button>
+        <button
           onClick={() => setActiveTab("orders")}
           style={tabButtonStyle(activeTab === "orders")}
         >
@@ -3368,8 +3483,133 @@ const orderSectionHeaderStyle: React.CSSProperties = {
       </>
       )}
 
+      {activeTab === "tables" && (
+        <section style={sectionStyle}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 12,
+              alignItems: "center",
+              flexWrap: "wrap",
+              marginBottom: 12,
+            }}
+          >
+            <div>
+              <h2 style={{ margin: "0 0 4px" }}>卓管理</h2>
+              <p style={{ margin: 0, color: "#4b5563" }}>
+                卓ごとの注文開始に使う卓を管理します。
+              </p>
+            </div>
+            <button onClick={loadTableData} disabled={loading}>
+              更新
+            </button>
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              gap: 8,
+              flexWrap: "wrap",
+              alignItems: "center",
+              marginBottom: 16,
+            }}
+          >
+            <input
+              value={newTableLabel}
+              onChange={(e) => setNewTableLabel(e.target.value)}
+              placeholder="例: 1卓"
+              style={{ ...inputStyle, flex: "1 1 220px" }}
+            />
+            <button type="button" onClick={addTable} disabled={loading}>
+              卓を追加
+            </button>
+          </div>
+
+          {tables.length === 0 ? (
+            <p style={{ margin: 0, color: "#6b7280" }}>
+              登録済みの卓はありません
+            </p>
+          ) : (
+            <div style={{ display: "grid", gap: 8 }}>
+              {tables.map((table) => {
+                const editing = editingTableId === table.id;
+                return (
+                  <div
+                    key={table.id}
+                    className="table-management-row"
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "minmax(160px, 1fr) 120px auto",
+                      gap: 8,
+                      alignItems: "center",
+                      border: "1px solid #e5e7eb",
+                      borderRadius: 8,
+                      padding: 10,
+                      background: "#fff",
+                    }}
+                  >
+                    {editing ? (
+                      <>
+                        <input
+                          value={editingTableLabel}
+                          onChange={(e) => setEditingTableLabel(e.target.value)}
+                          placeholder="卓名"
+                          style={inputStyle}
+                        />
+                        <input
+                          value={editingTableSortOrder}
+                          onChange={(e) => setEditingTableSortOrder(e.target.value)}
+                          placeholder="表示順"
+                          inputMode="numeric"
+                          style={inputStyle}
+                        />
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <button
+                            type="button"
+                            onClick={() => saveTable(table.id)}
+                            disabled={loading}
+                          >
+                            保存
+                          </button>
+                          <button type="button" onClick={cancelEditTable}>
+                            取消
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <strong>{table.label}</strong>
+                        <span style={{ color: "#4b5563" }}>
+                          表示順 {table.sort_order}
+                        </span>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <button
+                            type="button"
+                            onClick={() => startEditTable(table)}
+                          >
+                            編集
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeTable(table.id)}
+                            disabled={loading}
+                          >
+                            削除
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      )}
+
       {activeTab === "orders" && (
-      <section style={sectionStyle}>
+        <section style={sectionStyle}>
         <h2 style={{ margin: "0 0 12px" }}>注文管理</h2>
 
         {orderManagementGroups.length === 0 ? (
