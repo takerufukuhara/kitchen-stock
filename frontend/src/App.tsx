@@ -25,6 +25,7 @@ import {
   deleteRecipe,
   fetchCustomerGroup,
   fetchCustomerGroupOptions,
+  fetchAppSettings,
   fetchClosingReports,
   fetchOpeningChecklistItems,
   fetchOpeningReports,
@@ -39,11 +40,13 @@ import {
   requestCustomerGroupCheckout,
   startCookingOrder,
   updateCustomerGroupPartySize,
+  updateAppSettings,
   updateTable,
   updateMenuItem,
   type CustomerGroup,
   type CustomerGroupOption,
   type DiningTable,
+  type OrderStartMode,
   type ClosingReport,
   type OpeningChecklistItem,
   type OpeningReport,
@@ -1155,6 +1158,8 @@ function AdminApp({ onLogout }: { onLogout: () => void }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
+  const [orderStartMode, setOrderStartMode] = useState<OrderStartMode>("staff");
+  const [savingSettings, setSavingSettings] = useState(false);
 
   // ✅ 追加：商品ごとの数量入力を保持（key=item.id, value=入力文字列）
   const [qtyById, setQtyById] = useState<Record<string, string>>({});
@@ -1248,6 +1253,7 @@ const [activeTab, setActiveTab] = useState<
   | "prep"
   | "tables"
   | "orders"
+  | "settings"
   | "opening"
   | "closing"
 >("inventory");
@@ -1374,6 +1380,34 @@ const cancelEdit = () => {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadSettings = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const settings = await fetchAppSettings();
+      setOrderStartMode(settings.order_start_mode);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const saveOrderStartMode = async () => {
+    try {
+      setSavingSettings(true);
+      setError(null);
+      const settings = await updateAppSettings({
+        order_start_mode: orderStartMode,
+      });
+      setOrderStartMode(settings.order_start_mode);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingSettings(false);
     }
   };
 
@@ -2101,6 +2135,9 @@ const cancelEdit = () => {
     }
     if (activeTab === "tables") {
       loadTableData();
+    }
+    if (activeTab === "settings") {
+      loadSettings();
     }
     if (activeTab === "closing") {
       loadClosingCheckData();
@@ -3234,6 +3271,12 @@ const orderSectionHeaderStyle: React.CSSProperties = {
           注文管理
         </button>
         <button
+          onClick={() => setActiveTab("settings")}
+          style={tabButtonStyle(activeTab === "settings")}
+        >
+          店舗設定
+        </button>
+        <button
           onClick={() => setActiveTab("closing")}
           style={tabButtonStyle(activeTab === "closing")}
         >
@@ -4254,6 +4297,113 @@ const orderSectionHeaderStyle: React.CSSProperties = {
         )}
 
       </section>
+      )}
+
+      {activeTab === "settings" && (
+        <section style={sectionStyle}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 12,
+              alignItems: "center",
+              flexWrap: "wrap",
+              marginBottom: 12,
+            }}
+          >
+            <div>
+              <h2 style={{ margin: "0 0 4px" }}>店舗設定</h2>
+              <p style={{ margin: 0, color: "#4b5563" }}>
+                店舗ごとの注文運用を設定します。
+              </p>
+            </div>
+            <button onClick={loadSettings} disabled={loading}>
+              更新
+            </button>
+          </div>
+
+          <section
+            style={{
+              display: "grid",
+              gap: 12,
+              padding: 12,
+              border: "1px solid #e5e7eb",
+              borderRadius: 8,
+              background: "#fff",
+            }}
+          >
+            <div>
+              <h3 style={{ margin: "0 0 4px", fontSize: 16 }}>注文開始方式</h3>
+              <p style={{ margin: 0, color: "#4b5563", fontSize: 14 }}>
+                QRを開いたお客様が注文を始められる条件を選びます。
+              </p>
+            </div>
+
+            <label
+              style={{
+                display: "flex",
+                gap: 8,
+                alignItems: "flex-start",
+                padding: 10,
+                border: "1px solid #e5e7eb",
+                borderRadius: 8,
+                background: orderStartMode === "staff" ? "#eff6ff" : "#fff",
+              }}
+            >
+              <input
+                type="radio"
+                name="order-start-mode"
+                checked={orderStartMode === "staff"}
+                onChange={() => setOrderStartMode("staff")}
+                style={{ marginTop: 3 }}
+              />
+              <span>
+                <strong>スタッフが開始する</strong>
+                <span style={{ display: "block", color: "#4b5563", fontSize: 14 }}>
+                  管理画面で「注文開始」を押すまで、お客様は注文できません。
+                </span>
+              </span>
+            </label>
+
+            <label
+              style={{
+                display: "flex",
+                gap: 8,
+                alignItems: "flex-start",
+                padding: 10,
+                border: "1px solid #e5e7eb",
+                borderRadius: 8,
+                background: orderStartMode === "customer" ? "#eff6ff" : "#fff",
+              }}
+            >
+              <input
+                type="radio"
+                name="order-start-mode"
+                checked={orderStartMode === "customer"}
+                onChange={() => setOrderStartMode("customer")}
+                style={{ marginTop: 3 }}
+              />
+              <span>
+                <strong>お客様が開始する</strong>
+                <span style={{ display: "block", color: "#4b5563", fontSize: 14 }}>
+                  お客様がQRを開いた後、自分で人数を入力して注文開始できます。
+                </span>
+              </span>
+            </label>
+
+            <button
+              type="button"
+              onClick={saveOrderStartMode}
+              disabled={savingSettings}
+              style={{
+                width: "fit-content",
+                opacity: savingSettings ? 0.7 : 1,
+              }}
+            >
+              {savingSettings ? "保存中..." : "設定を保存"}
+            </button>
+          </section>
+        </section>
       )}
 
       {activeTab === "closing" && (
