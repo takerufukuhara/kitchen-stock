@@ -1418,6 +1418,25 @@ const cancelEdit = () => {
     }
   };
 
+  const startTableOrderSessionFromOption = async (option: CustomerGroupOption) => {
+    if (!option.table_id) return;
+
+    try {
+      setStartingTableId(option.table_id);
+      setError(null);
+      await createCustomerGroup({
+        table_id: option.table_id,
+        label: option.label,
+      });
+      await loadOrderData();
+      await loadTableData();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setStartingTableId(null);
+    }
+  };
+
   const getTodayRange = () => {
     const start = new Date();
     start.setHours(0, 0, 0, 0);
@@ -2257,10 +2276,6 @@ const cancelEdit = () => {
   const staffCallOrders = orders.filter(
     (order) => order.staff_called_at && !order.staff_call_confirmed_at
   );
-  const activeCustomerGroups = customerGroupOptions
-    .filter((option) => option.active_group)
-    .map((option) => option.active_group)
-    .filter((group): group is CustomerGroup => Boolean(group));
   const activeCustomerGroupByTableId = new Map(
     customerGroupOptions
       .filter((option) => option.table_id && option.active_group)
@@ -2270,15 +2285,20 @@ const cancelEdit = () => {
     targetOrders.filter((order) => order.customer_group_id === groupId);
   const getStaffCallsByGroup = (groupId: string) =>
     staffCalls.filter((call) => call.customer_group_id === groupId);
-  const orderManagementGroups = activeCustomerGroups.map((group) => {
-    const groupPendingOrders = getOrdersByGroup(group.id, pendingOrders);
-    const groupHistoryOrders = getOrdersByGroup(group.id, historyOrders);
-    const groupCanceledOrders = getOrdersByGroup(group.id, canceledOrders);
-    const groupStaffCalls = getStaffCallsByGroup(group.id);
-    const groupStaffCallOrders = getOrdersByGroup(group.id, staffCallOrders);
+  const orderManagementGroups = customerGroupOptions.map((option) => {
+    const group = option.active_group;
+    const sectionKey = group?.id ?? `table:${option.table_id ?? option.label}`;
+    const groupPendingOrders = group ? getOrdersByGroup(group.id, pendingOrders) : [];
+    const groupHistoryOrders = group ? getOrdersByGroup(group.id, historyOrders) : [];
+    const groupCanceledOrders = group ? getOrdersByGroup(group.id, canceledOrders) : [];
+    const groupStaffCalls = group ? getStaffCallsByGroup(group.id) : [];
+    const groupStaffCallOrders = group ? getOrdersByGroup(group.id, staffCallOrders) : [];
 
     return {
+      option,
       group,
+      sectionKey,
+      label: option.label,
       pendingOrders: groupPendingOrders,
       historyOrders: groupHistoryOrders,
       canceledOrders: groupCanceledOrders,
@@ -2288,7 +2308,7 @@ const cancelEdit = () => {
         groupCanceledOrders.length +
         groupStaffCalls.length +
         groupStaffCallOrders.length +
-        (group.checkout_requested_at ? 1 : 0),
+        (group?.checkout_requested_at ? 1 : 0),
     };
   });
   const getOrderSectionKey = (groupId: string, section: string) =>
@@ -3762,7 +3782,7 @@ const orderSectionHeaderStyle: React.CSSProperties = {
         <h2 style={{ margin: "0 0 12px" }}>注文管理</h2>
 
         {orderManagementGroups.length === 0 ? (
-          <p style={{ margin: 0 }}>使用中の卓はありません</p>
+          <p style={{ margin: 0 }}>登録済みの卓はありません</p>
         ) : (
         <div
           className="order-table-grid"
@@ -3774,9 +3794,9 @@ const orderSectionHeaderStyle: React.CSSProperties = {
           }}
         >
           {orderManagementGroups.map(
-            ({ group, pendingOrders, historyOrders, canceledOrders, staffCalls, staffCallOrders, noticeCount }) => (
+            ({ option, group, sectionKey, label, pendingOrders, historyOrders, canceledOrders, staffCalls, staffCallOrders, noticeCount }) => (
               <section
-                key={group.id}
+                key={sectionKey}
                 style={{
                   border: "1px solid #ddd",
                   borderRadius: 8,
@@ -3795,32 +3815,51 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                   }}
                 >
                   <h3 style={{ margin: 0, fontSize: 18 }}>
-                    {group.label}
+                    {label}
                     {notificationBadge(noticeCount)}
                   </h3>
                   <div style={{ display: "grid", gap: 4, justifyItems: "end" }}>
-                    {group.checkout_requested_at ? (
+                    {group?.checkout_requested_at ? (
                       <span style={{ fontSize: 13, fontWeight: 700, color: "#b45309" }}>
                         会計希望あり
                       </span>
+                    ) : group ? (
+                      <span style={{ fontSize: 13, fontWeight: 700, color: "#166534" }}>
+                        注文中
+                      </span>
                     ) : (
                       <span style={{ fontSize: 13, color: "#6b7280" }}>
-                        会計希望なし
+                        空席
                       </span>
                     )}
-                    <button
-                      onClick={() => checkoutGroup(group.id)}
-                      disabled={loading || !group.checkout_requested_at}
-                      style={{
-                        opacity: loading || !group.checkout_requested_at ? 0.55 : 1,
-                        cursor: loading || !group.checkout_requested_at ? "not-allowed" : "pointer",
-                      }}
-                    >
-                      会計済みにする
-                    </button>
+                    {group ? (
+                      <button
+                        onClick={() => checkoutGroup(group.id)}
+                        disabled={loading || !group.checkout_requested_at}
+                        style={{
+                          opacity: loading || !group.checkout_requested_at ? 0.55 : 1,
+                          cursor: loading || !group.checkout_requested_at ? "not-allowed" : "pointer",
+                        }}
+                      >
+                        会計済みにする
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => startTableOrderSessionFromOption(option)}
+                        disabled={loading || !option.table_id || startingTableId === option.table_id}
+                      >
+                        {startingTableId === option.table_id ? "開始中..." : "注文開始"}
+                      </button>
+                    )}
                   </div>
                 </div>
 
+                {!group ? (
+                  <p style={{ margin: 0, color: "#4b5563" }}>
+                    この卓はまだ注文開始されていません。
+                  </p>
+                ) : (
                 <div style={{ display: "grid", gap: 12 }}>
                   <div
                     style={{
@@ -3832,15 +3871,15 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                   >
                     <button
                       type="button"
-                      onClick={() => toggleOrderSection(group.id, "pending")}
+                      onClick={() => toggleOrderSection(sectionKey, "pending")}
                       style={orderSectionHeaderStyle}
                     >
                       <span>
-                        {isOrderSectionOpen(group.id, "pending") ? "▼" : "▶"} 注文中
+                        {isOrderSectionOpen(sectionKey, "pending") ? "▼" : "▶"} 注文中
                       </span>
                       {notificationBadge(pendingOrders.length)}
                     </button>
-                    {isOrderSectionOpen(group.id, "pending") && (
+                    {isOrderSectionOpen(sectionKey, "pending") && (
                     pendingOrders.length === 0 ? (
                       <p style={{ margin: 0, color: "#4b5563" }}>注文中の商品はありません</p>
                     ) : (
@@ -3917,14 +3956,14 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                   >
                     <button
                       type="button"
-                      onClick={() => toggleOrderSection(group.id, "manual")}
+                      onClick={() => toggleOrderSection(sectionKey, "manual")}
                       style={orderSectionHeaderStyle}
                     >
                       <span>
-                        {isOrderSectionOpen(group.id, "manual") ? "▼" : "▶"} 手動注文
+                        {isOrderSectionOpen(sectionKey, "manual") ? "▼" : "▶"} 手動注文
                       </span>
                     </button>
-                    {isOrderSectionOpen(group.id, "manual") && (
+                    {isOrderSectionOpen(sectionKey, "manual") && (
                     <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
                       <select
                         value={orderMenuId}
@@ -3964,15 +4003,15 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                   >
                     <button
                       type="button"
-                      onClick={() => toggleOrderSection(group.id, "canceled")}
+                      onClick={() => toggleOrderSection(sectionKey, "canceled")}
                       style={orderSectionHeaderStyle}
                     >
                       <span>
-                        {isOrderSectionOpen(group.id, "canceled") ? "▼" : "▶"} キャンセル
+                        {isOrderSectionOpen(sectionKey, "canceled") ? "▼" : "▶"} キャンセル
                       </span>
                       {notificationBadge(canceledOrders.length)}
                     </button>
-                    {isOrderSectionOpen(group.id, "canceled") && (
+                    {isOrderSectionOpen(sectionKey, "canceled") && (
                     canceledOrders.length === 0 ? (
                       <p style={{ margin: 0, color: "#4b5563" }}>未確認のキャンセルはありません</p>
                     ) : (
@@ -4010,15 +4049,15 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                   >
                     <button
                       type="button"
-                      onClick={() => toggleOrderSection(group.id, "staff-calls")}
+                      onClick={() => toggleOrderSection(sectionKey, "staff-calls")}
                       style={orderSectionHeaderStyle}
                     >
                       <span>
-                        {isOrderSectionOpen(group.id, "staff-calls") ? "▼" : "▶"} 呼び出し
+                        {isOrderSectionOpen(sectionKey, "staff-calls") ? "▼" : "▶"} 呼び出し
                       </span>
                       {notificationBadge(staffCalls.length + staffCallOrders.length)}
                     </button>
-                    {isOrderSectionOpen(group.id, "staff-calls") && (
+                    {isOrderSectionOpen(sectionKey, "staff-calls") && (
                     staffCalls.length + staffCallOrders.length === 0 ? (
                       <p style={{ margin: 0, color: "#4b5563" }}>未確認の呼び出しはありません</p>
                     ) : (
@@ -4070,14 +4109,14 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                   >
                     <button
                       type="button"
-                      onClick={() => toggleOrderSection(group.id, "history")}
+                      onClick={() => toggleOrderSection(sectionKey, "history")}
                       style={orderSectionHeaderStyle}
                     >
                       <span>
-                        {isOrderSectionOpen(group.id, "history") ? "▼" : "▶"} 注文履歴
+                        {isOrderSectionOpen(sectionKey, "history") ? "▼" : "▶"} 注文履歴
                       </span>
                     </button>
-                    {isOrderSectionOpen(group.id, "history") && (
+                    {isOrderSectionOpen(sectionKey, "history") && (
                     historyOrders.length === 0 ? (
                       <p style={{ margin: 0, color: "#4b5563" }}>完了・キャンセル済みの注文はありません</p>
                     ) : (
@@ -4096,6 +4135,7 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                     ))}
                   </div>
                 </div>
+                )}
               </section>
             )
           )}
