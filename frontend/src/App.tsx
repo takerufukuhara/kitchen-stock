@@ -99,7 +99,44 @@ export default function App() {
     return <AdminRoute />;
   }
 
-  return <CustomerOrderPage tableId={tableOrderMatch?.[1] ?? null} />;
+  if (tableOrderMatch) {
+    return <CustomerOrderPage tableId={tableOrderMatch[1]} />;
+  }
+
+  return <CustomerOrderGuidePage />;
+}
+
+function CustomerOrderGuidePage() {
+  return (
+    <div
+      className="customer-page"
+      style={{
+        minHeight: "100vh",
+        backgroundColor: "#f4f6f8",
+        color: "#111827",
+        padding: "40px 16px",
+        fontFamily:
+          'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+      }}
+    >
+      <main
+        className="customer-shell"
+        style={{
+          maxWidth: 520,
+          margin: "0 auto",
+          background: "#fff",
+          padding: 24,
+          borderRadius: 12,
+          boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+        }}
+      >
+        <h1 style={{ margin: "0 0 8px" }}>注文画面</h1>
+        <p style={{ margin: 0, color: "#4b5563", lineHeight: 1.7 }}>
+          卓ごとのQRコードからアクセスしてください。
+        </p>
+      </main>
+    </div>
+  );
 }
 
 function AdminRoute() {
@@ -215,7 +252,7 @@ function AdminLoginPage() {
   );
 }
 
-function CustomerOrderPage({ tableId }: { tableId: string | null }) {
+function CustomerOrderPage({ tableId }: { tableId: string }) {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [quantityByMenuId, setQuantityByMenuId] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -329,46 +366,27 @@ function CustomerOrderPage({ tableId }: { tableId: string | null }) {
   const refreshCustomerGroupOptions = async () => {
     const options = await fetchCustomerGroupOptions();
     setCustomerGroupOptions(options);
-    const tableOption = tableId
-      ? options.find((option) => option.table_id === tableId)
-      : null;
+    const tableOption = options.find((option) => option.table_id === tableId);
     setSelectedGroupLabel((current) => tableOption?.label || current || options[0]?.label || "");
     return options;
   };
 
   useEffect(() => {
     const loadCustomerGroup = async () => {
-      const groupId = window.localStorage.getItem(CUSTOMER_GROUP_ID_KEY);
-
       try {
         const options = await refreshCustomerGroupOptions();
-        const tableOption = tableId
-          ? options.find((option) => option.table_id === tableId)
-          : null;
+        const tableOption = options.find((option) => option.table_id === tableId);
 
-        if (tableId) {
-          if (tableOption?.active_group) {
-            window.localStorage.setItem(CUSTOMER_GROUP_ID_KEY, tableOption.active_group.id);
-            window.localStorage.removeItem(CUSTOMER_CHECKOUT_REQUESTED_KEY);
-            setCustomerGroup(tableOption.active_group);
-            setSelectedGroupLabel(tableOption.label);
-            setCheckoutRequested(false);
-          } else {
-            resetCustomerSession();
-          }
-          return;
-        }
-
-        if (!groupId) return;
-
-        const group = await fetchCustomerGroup(groupId);
-        if (group.closed_at) {
+        if (tableOption?.active_group) {
+          window.localStorage.setItem(CUSTOMER_GROUP_ID_KEY, tableOption.active_group.id);
+          window.localStorage.removeItem(CUSTOMER_CHECKOUT_REQUESTED_KEY);
+          setCustomerGroup(tableOption.active_group);
+          setSelectedGroupLabel(tableOption.label);
+          setCheckoutRequested(false);
+        } else {
           resetCustomerSession();
           return;
         }
-
-        setCustomerGroup(group);
-        setSelectedGroupLabel(group.label ?? "");
       } catch {
         window.localStorage.removeItem(CUSTOMER_GROUP_ID_KEY);
       }
@@ -383,7 +401,7 @@ function CustomerOrderPage({ tableId }: { tableId: string | null }) {
       setError(null);
       const label = selectedGroupLabel || customerGroupOptions[0]?.label || "";
       const activeGroup = selectedGroupOption?.active_group;
-      if (tableId && !activeGroup) {
+      if (!activeGroup) {
         setError("スタッフが注文開始するまでお待ちください");
         return;
       }
@@ -618,12 +636,10 @@ function CustomerOrderPage({ tableId }: { tableId: string | null }) {
     }
   };
 
-  const selectedGroupOption = customerGroupOptions.find((option) =>
-    tableId ? option.table_id === tableId : option.label === selectedGroupLabel
+  const selectedGroupOption = customerGroupOptions.find(
+    (option) => option.table_id === tableId
   );
-  const canStartCustomerGroup = tableId
-    ? Boolean(selectedGroupOption?.active_group)
-    : Boolean(selectedGroupLabel);
+  const canStartCustomerGroup = Boolean(selectedGroupOption?.active_group);
   const getCustomerMenuCategoryLabel = (menu: MenuItem) =>
     menu.category?.trim() || "未分類";
   const customerMenuCategoryGroups = Array.from(
@@ -827,7 +843,7 @@ function CustomerOrderPage({ tableId }: { tableId: string | null }) {
                   >
                     会計
                   </button>
-              ) : tableId ? (
+              ) : (
                 <div
                   style={{
                     display: "grid",
@@ -854,46 +870,6 @@ function CustomerOrderPage({ tableId }: { tableId: string | null }) {
                       {creatingGroup ? "確認中..." : "注文画面へ"}
                     </button>
                   )}
-                </div>
-              ) : (
-                <div
-                  className="customer-start-grid"
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "minmax(0, 1fr) 120px",
-                    gap: 8,
-                  }}
-                >
-                  <select
-                    value={selectedGroupLabel}
-                    onChange={(e) => setSelectedGroupLabel(e.target.value)}
-                    style={inputStyle}
-                  >
-                    {customerGroupOptions.map((option) => (
-                      <option
-                        key={option.table_id ?? option.label}
-                        value={option.label}
-                      >
-                        {option.label}
-                        {option.active_group ? "（注文中）" : ""}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    onClick={startCustomerGroup}
-                    disabled={creatingGroup || !canStartCustomerGroup}
-                    style={{
-                      ...buttonStyle,
-                      opacity: creatingGroup || !canStartCustomerGroup ? 0.7 : 1,
-                    }}
-                  >
-                    {creatingGroup
-                      ? "確認中..."
-                      : selectedGroupOption?.active_group
-                        ? "注文画面へ"
-                        : "注文開始"}
-                  </button>
                 </div>
               )}
             </section>
@@ -1089,9 +1065,7 @@ function CustomerOrderPage({ tableId }: { tableId: string | null }) {
 
         {!checkoutRequested && !customerGroup ? (
           <p style={{ margin: 0, color: "#4b5563" }}>
-            {tableId
-              ? "スタッフが注文開始するまでお待ちください。"
-              : "卓番号を選んで「注文開始」を押してください。"}
+            スタッフが注文開始するまでお待ちください。
           </p>
         ) : !checkoutRequested && customerGroup && !loading && menuItems.length === 0 ? (
           <p>注文できるメニューはまだありません</p>
@@ -3115,16 +3089,7 @@ const orderSectionHeaderStyle: React.CSSProperties = {
           marginBottom: 16,
         }}
       >
-        <a
-          href="/order"
-          style={{
-            ...buttonStyle,
-            padding: "10px 14px",
-            textDecoration: "none",
-          }}
-        >
-          お客様注文画面
-        </a>
+        <div />
         <button
           onClick={onLogout}
           style={{
