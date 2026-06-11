@@ -798,10 +798,16 @@ app.patch("/staff-calls/:id/cancel", async (req, res) => {
 
 app.get("/customer-groups", async (_req, res) => {
   try {
+    const tableLabels = await getActiveTableLabels();
+
+    if (tableLabels.length === 0) {
+      return res.json([]);
+    }
+
     const { data, error } = await supabase
       .from("customer_groups")
       .select("id,label,created_at,closed_at,checkout_requested_at")
-      .in("label", customerGroupLabels)
+      .in("label", tableLabels)
       .is("closed_at", null)
       .order("created_at", { ascending: false });
 
@@ -812,7 +818,7 @@ app.get("/customer-groups", async (_req, res) => {
     );
 
     res.json(
-      customerGroupLabels.map((label) => ({
+      tableLabels.map((label) => ({
         label,
         active_group: activeByLabel.get(label) ?? null,
       }))
@@ -824,10 +830,15 @@ app.get("/customer-groups", async (_req, res) => {
 
 app.post("/customer-groups", async (req, res) => {
   try {
+    const tableLabels = await getActiveTableLabels();
     const rawLabel = typeof req.body?.label === "string" ? req.body.label.trim() : "";
-    const label = rawLabel || customerGroupLabels[0];
+    const label = rawLabel || tableLabels[0];
 
-    if (!customerGroupLabels.includes(label)) {
+    if (tableLabels.length === 0) {
+      return res.status(400).json({ error: "登録済みの卓がありません" });
+    }
+
+    if (!tableLabels.includes(label)) {
       return res.status(400).json({ error: "登録されていない卓です" });
     }
 
