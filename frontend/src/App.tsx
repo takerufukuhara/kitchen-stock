@@ -84,6 +84,7 @@ const normalizeItemNameInput = (value: string) =>
 
 export default function App() {
   const path = window.location.pathname.replace(/\/+$/, "") || "/";
+  const tableOrderMatch = path.match(/^\/order\/table\/([^/]+)$/);
 
   if (path === "/login") {
     return <AdminLoginPage />;
@@ -93,7 +94,7 @@ export default function App() {
     return <AdminRoute />;
   }
 
-  return <CustomerOrderPage />;
+  return <CustomerOrderPage tableId={tableOrderMatch?.[1] ?? null} />;
 }
 
 function AdminRoute() {
@@ -209,7 +210,7 @@ function AdminLoginPage() {
   );
 }
 
-function CustomerOrderPage() {
+function CustomerOrderPage({ tableId }: { tableId: string | null }) {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [quantityByMenuId, setQuantityByMenuId] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -323,7 +324,11 @@ function CustomerOrderPage() {
   const refreshCustomerGroupOptions = async () => {
     const options = await fetchCustomerGroupOptions();
     setCustomerGroupOptions(options);
-    setSelectedGroupLabel((current) => current || options[0]?.label || "");
+    const tableOption = tableId
+      ? options.find((option) => option.table_id === tableId)
+      : null;
+    setSelectedGroupLabel((current) => tableOption?.label || current || options[0]?.label || "");
+    return options;
   };
 
   useEffect(() => {
@@ -331,7 +336,23 @@ function CustomerOrderPage() {
       const groupId = window.localStorage.getItem(CUSTOMER_GROUP_ID_KEY);
 
       try {
-        await refreshCustomerGroupOptions();
+        const options = await refreshCustomerGroupOptions();
+        const tableOption = tableId
+          ? options.find((option) => option.table_id === tableId)
+          : null;
+
+        if (tableId) {
+          if (tableOption?.active_group) {
+            window.localStorage.setItem(CUSTOMER_GROUP_ID_KEY, tableOption.active_group.id);
+            window.localStorage.removeItem(CUSTOMER_CHECKOUT_REQUESTED_KEY);
+            setCustomerGroup(tableOption.active_group);
+            setSelectedGroupLabel(tableOption.label);
+            setCheckoutRequested(false);
+          } else {
+            resetCustomerSession();
+          }
+          return;
+        }
 
         if (!groupId) return;
 
@@ -349,7 +370,7 @@ function CustomerOrderPage() {
     };
 
     loadCustomerGroup();
-  }, []);
+  }, [tableId]);
 
   const startCustomerGroup = async () => {
     try {
@@ -357,7 +378,16 @@ function CustomerOrderPage() {
       setError(null);
       const label = selectedGroupLabel || customerGroupOptions[0]?.label || "";
       const activeGroup = selectedGroupOption?.active_group;
-      const group = activeGroup ?? (await createCustomerGroup(label));
+      if (tableId && !activeGroup) {
+        setError("スタッフが注文開始するまでお待ちください");
+        return;
+      }
+      const group =
+        activeGroup ??
+        (await createCustomerGroup({
+          label,
+          table_id: selectedGroupOption?.table_id ?? undefined,
+        }));
       window.localStorage.setItem(CUSTOMER_GROUP_ID_KEY, group.id);
       window.localStorage.removeItem(CUSTOMER_CHECKOUT_REQUESTED_KEY);
       setCustomerGroup(group);
@@ -583,10 +613,12 @@ function CustomerOrderPage() {
     }
   };
 
-  const selectedGroupOption = customerGroupOptions.find(
-    (option) => option.label === selectedGroupLabel
+  const selectedGroupOption = customerGroupOptions.find((option) =>
+    tableId ? option.table_id === tableId : option.label === selectedGroupLabel
   );
-  const canStartCustomerGroup = Boolean(selectedGroupLabel);
+  const canStartCustomerGroup = tableId
+    ? Boolean(selectedGroupOption?.active_group)
+    : Boolean(selectedGroupLabel);
   const getCustomerMenuCategoryLabel = (menu: MenuItem) =>
     menu.category?.trim() || "未分類";
   const customerMenuCategoryGroups = Array.from(
@@ -790,6 +822,34 @@ function CustomerOrderPage() {
                   >
                     会計
                   </button>
+              ) : tableId ? (
+                <div
+                  style={{
+                    display: "grid",
+                    gap: 6,
+                    minWidth: 220,
+                  }}
+                >
+                  <strong>{selectedGroupOption?.label ?? "この卓"}</strong>
+                  <span style={{ color: "#6b7280", fontSize: 13 }}>
+                    {selectedGroupOption
+                      ? "スタッフが注文開始するまでお待ちください"
+                      : "この卓は現在利用できません"}
+                  </span>
+                  {selectedGroupOption?.active_group && (
+                    <button
+                      type="button"
+                      onClick={startCustomerGroup}
+                      disabled={creatingGroup || !canStartCustomerGroup}
+                      style={{
+                        ...buttonStyle,
+                        opacity: creatingGroup || !canStartCustomerGroup ? 0.7 : 1,
+                      }}
+                    >
+                      {creatingGroup ? "確認中..." : "注文画面へ"}
+                    </button>
+                  )}
+                </div>
               ) : (
                 <div
                   className="customer-start-grid"
@@ -806,7 +866,7 @@ function CustomerOrderPage() {
                   >
                     {customerGroupOptions.map((option) => (
                       <option
-                        key={option.label}
+                        key={option.table_id ?? option.label}
                         value={option.label}
                       >
                         {option.label}
@@ -1024,7 +1084,9 @@ function CustomerOrderPage() {
 
         {!checkoutRequested && !customerGroup ? (
           <p style={{ margin: 0, color: "#4b5563" }}>
-            卓番号を選んで「注文開始」を押してください。
+            {tableId
+              ? "スタッフが注文開始するまでお待ちください。"
+              : "卓番号を選んで「注文開始」を押してください。"}
           </p>
         ) : !checkoutRequested && customerGroup && !loading && menuItems.length === 0 ? (
           <p>注文できるメニューはまだありません</p>
@@ -3632,6 +3694,19 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                               : "空席"}
                         </span>
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <a
+                            href={`/order/table/${table.id}`}
+                            style={{
+                              ...buttonStyle,
+                              minHeight: 0,
+                              padding: "6px 10px",
+                              textDecoration: "none",
+                              display: "inline-flex",
+                              alignItems: "center",
+                            }}
+                          >
+                            注文画面
+                          </a>
                           {activeGroup ? (
                             <button
                               type="button"
