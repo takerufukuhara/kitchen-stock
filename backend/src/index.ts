@@ -35,6 +35,24 @@ const getActiveTables = async () => {
   return data ?? [];
 };
 
+const defaultAppSettings = {
+  order_start_mode: "staff",
+};
+
+const getAppSettings = async () => {
+  const { data, error } = await supabase
+    .from("app_settings")
+    .select("key,value")
+    .in("key", Object.keys(defaultAppSettings));
+
+  if (error) throw error;
+
+  return {
+    ...defaultAppSettings,
+    ...Object.fromEntries((data ?? []).map((setting) => [setting.key, setting.value])),
+  };
+};
+
 const requireAdmin: express.RequestHandler = (req, res, next) => {
   const authHeader = req.header("Authorization");
   const token = authHeader?.startsWith("Bearer ")
@@ -66,6 +84,39 @@ app.post("/admin/login", async (req, res) => {
   }
 
   res.json({ token: adminToken });
+});
+
+app.get("/app-settings", async (_req, res) => {
+  try {
+    const settings = await getAppSettings();
+    res.json(settings);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+app.patch("/app-settings", requireAdmin, async (req, res) => {
+  try {
+    const orderStartMode = String(req.body?.order_start_mode ?? "").trim();
+
+    if (!["staff", "customer"].includes(orderStartMode)) {
+      return res.status(400).json({
+        error: "order_start_mode は staff または customer を指定してください",
+      });
+    }
+
+    const { error } = await supabase.from("app_settings").upsert({
+      key: "order_start_mode",
+      value: orderStartMode,
+      updated_at: new Date().toISOString(),
+    });
+
+    if (error) return res.status(500).json({ error: error.message });
+
+    res.json({ order_start_mode: orderStartMode });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
 });
 
 app.get("/tables", requireAdmin, async (_req, res) => {

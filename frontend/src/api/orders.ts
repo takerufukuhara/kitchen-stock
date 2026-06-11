@@ -90,6 +90,12 @@ export type DiningTable = {
   updated_at: string | null;
 };
 
+export type OrderStartMode = "staff" | "customer";
+
+export type AppSettings = {
+  order_start_mode: OrderStartMode;
+};
+
 export type ClosingReport = {
   id: string;
   business_date: string;
@@ -294,6 +300,20 @@ export async function createOrder(params: {
   return request<Order>("/orders", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+}
+
+export async function fetchAppSettings(): Promise<AppSettings> {
+  return request<AppSettings>("/app-settings");
+}
+
+export async function updateAppSettings(
+  params: AppSettings
+): Promise<AppSettings> {
+  return request<AppSettings>("/app-settings", {
+    method: "PATCH",
+    headers: adminHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(params),
   });
 }
