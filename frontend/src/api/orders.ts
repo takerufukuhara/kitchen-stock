@@ -38,8 +38,8 @@ export type Order = {
   staff_call_confirmed_at: string | null;
   menu_items?: { name: string } | { name: string }[] | null;
   customer_groups?:
-    | { label: string | null; closed_at?: string | null }
-    | { label: string | null; closed_at?: string | null }[]
+    | { label: string | null; table_id?: string | null; closed_at?: string | null }
+    | { label: string | null; table_id?: string | null; closed_at?: string | null }[]
     | null;
 };
 
@@ -49,18 +49,23 @@ export type StaffCall = {
   created_at: string;
   confirmed_at: string | null;
   cancelled_at: string | null;
-  customer_groups?: { label: string | null } | { label: string | null }[] | null;
+  customer_groups?:
+    | { label: string | null; table_id?: string | null }
+    | { label: string | null; table_id?: string | null }[]
+    | null;
 };
 
 export type CustomerGroup = {
   id: string;
   label: string | null;
+  table_id: string | null;
   created_at: string;
   closed_at: string | null;
   checkout_requested_at: string | null;
 };
 
 export type CustomerGroupOption = {
+  table_id: string | null;
   label: string;
   active_group: CustomerGroup | null;
 };
@@ -314,11 +319,15 @@ export async function deleteTable(id: string): Promise<void> {
   });
 }
 
-export async function createCustomerGroup(label: string): Promise<CustomerGroup> {
+export async function createCustomerGroup(
+  params: string | { label?: string; table_id?: string }
+): Promise<CustomerGroup> {
+  const body = typeof params === "string" ? { label: params } : params;
+
   return request<CustomerGroup>("/customer-groups", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ label }),
+    body: JSON.stringify(body),
   });
 }
 

@@ -356,7 +356,8 @@ function CustomerOrderPage() {
       setCreatingGroup(true);
       setError(null);
       const label = selectedGroupLabel || customerGroupOptions[0]?.label || "";
-      const group = await createCustomerGroup(label);
+      const activeGroup = selectedGroupOption?.active_group;
+      const group = activeGroup ?? (await createCustomerGroup(label));
       window.localStorage.setItem(CUSTOMER_GROUP_ID_KEY, group.id);
       window.localStorage.removeItem(CUSTOMER_CHECKOUT_REQUESTED_KEY);
       setCustomerGroup(group);
@@ -585,8 +586,7 @@ function CustomerOrderPage() {
   const selectedGroupOption = customerGroupOptions.find(
     (option) => option.label === selectedGroupLabel
   );
-  const canStartCustomerGroup =
-    Boolean(selectedGroupLabel) && !selectedGroupOption?.active_group;
+  const canStartCustomerGroup = Boolean(selectedGroupLabel);
   const getCustomerMenuCategoryLabel = (menu: MenuItem) =>
     menu.category?.trim() || "未分類";
   const customerMenuCategoryGroups = Array.from(
@@ -808,7 +808,6 @@ function CustomerOrderPage() {
                       <option
                         key={option.label}
                         value={option.label}
-                        disabled={Boolean(option.active_group)}
                       >
                         {option.label}
                         {option.active_group ? "（注文中）" : ""}
@@ -824,7 +823,11 @@ function CustomerOrderPage() {
                       opacity: creatingGroup || !canStartCustomerGroup ? 0.7 : 1,
                     }}
                   >
-                    {creatingGroup ? "開始中..." : "注文開始"}
+                    {creatingGroup
+                      ? "確認中..."
+                      : selectedGroupOption?.active_group
+                        ? "注文画面へ"
+                        : "注文開始"}
                   </button>
                 </div>
               )}
@@ -1061,6 +1064,7 @@ function AdminApp({ onLogout }: { onLogout: () => void }) {
   const [editingTableId, setEditingTableId] = useState<string | null>(null);
   const [editingTableLabel, setEditingTableLabel] = useState("");
   const [editingTableSortOrder, setEditingTableSortOrder] = useState("");
+  const [startingTableId, setStartingTableId] = useState<string | null>(null);
   const [closingChecklist, setClosingChecklist] = useState<Record<string, boolean>>({});
   const [closingFinished, setClosingFinished] = useState(false);
   const [closingReports, setClosingReports] = useState<ClosingReport[]>([]);
@@ -1242,10 +1246,15 @@ const cancelEdit = () => {
     try {
       setLoading(true);
       setError(null);
-      const tableData = await fetchTables();
+      const [tableData, customerGroupData] = await Promise.all([
+        fetchTables(),
+        fetchCustomerGroupOptions(),
+      ]);
       setTables(tableData);
+      setCustomerGroupOptions(customerGroupData);
     } catch (e) {
       setTables([]);
+      setCustomerGroupOptions([]);
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
@@ -1330,6 +1339,20 @@ const cancelEdit = () => {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const startTableOrderSession = async (table: DiningTable) => {
+    try {
+      setStartingTableId(table.id);
+      setError(null);
+      await createCustomerGroup({ table_id: table.id, label: table.label });
+      await loadTableData();
+      await loadOrderData();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setStartingTableId(null);
     }
   };
 
@@ -2176,6 +2199,11 @@ const cancelEdit = () => {
     .filter((option) => option.active_group)
     .map((option) => option.active_group)
     .filter((group): group is CustomerGroup => Boolean(group));
+  const activeCustomerGroupByTableId = new Map(
+    customerGroupOptions
+      .filter((option) => option.table_id && option.active_group)
+      .map((option) => [option.table_id, option.active_group as CustomerGroup])
+  );
   const getOrdersByGroup = (groupId: string, targetOrders: Order[]) =>
     targetOrders.filter((order) => order.customer_group_id === groupId);
   const getStaffCallsByGroup = (groupId: string) =>
@@ -2753,6 +2781,7 @@ const cancelEdit = () => {
       setError(null);
       await checkoutCustomerGroup(groupId);
       await loadOrderData();
+      await loadTableData();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -3534,13 +3563,14 @@ const orderSectionHeaderStyle: React.CSSProperties = {
             <div style={{ display: "grid", gap: 8 }}>
               {tables.map((table) => {
                 const editing = editingTableId === table.id;
+                const activeGroup = activeCustomerGroupByTableId.get(table.id);
                 return (
                   <div
                     key={table.id}
                     className="table-management-row"
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "minmax(160px, 1fr) 120px auto",
+                      gridTemplateColumns: "minmax(150px, 1fr) 130px auto",
                       gap: 8,
                       alignItems: "center",
                       border: "1px solid #e5e7eb",
@@ -3579,21 +3609,65 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                       </>
                     ) : (
                       <>
-                        <strong>{table.label}</strong>
-                        <span style={{ color: "#4b5563" }}>
-                          表示順 {table.sort_order}
+                        <div>
+                          <strong>{table.label}</strong>
+                          <p style={{ margin: "4px 0 0", color: "#6b7280", fontSize: 13 }}>
+                            表示順 {table.sort_order}
+                          </p>
+                        </div>
+                        <span
+                          style={{
+                            color: activeGroup?.checkout_requested_at
+                              ? "#b45309"
+                              : activeGroup
+                                ? "#166534"
+                                : "#4b5563",
+                            fontWeight: 700,
+                          }}
+                        >
+                          {activeGroup?.checkout_requested_at
+                            ? "会計希望あり"
+                            : activeGroup
+                              ? "注文中"
+                              : "空席"}
                         </span>
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          {activeGroup ? (
+                            <button
+                              type="button"
+                              onClick={() => checkoutGroup(activeGroup.id)}
+                              disabled={loading || !activeGroup.checkout_requested_at}
+                              style={{
+                                opacity:
+                                  loading || !activeGroup.checkout_requested_at ? 0.55 : 1,
+                                cursor:
+                                  loading || !activeGroup.checkout_requested_at
+                                    ? "not-allowed"
+                                    : "pointer",
+                              }}
+                            >
+                              会計済み
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => startTableOrderSession(table)}
+                              disabled={loading || startingTableId === table.id}
+                            >
+                              {startingTableId === table.id ? "開始中..." : "注文開始"}
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => startEditTable(table)}
+                            disabled={Boolean(activeGroup)}
                           >
                             編集
                           </button>
                           <button
                             type="button"
                             onClick={() => removeTable(table.id)}
-                            disabled={loading}
+                            disabled={loading || Boolean(activeGroup)}
                           >
                             削除
                           </button>

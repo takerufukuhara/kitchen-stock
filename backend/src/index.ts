@@ -23,16 +23,16 @@ const adminPassword = process.env.ADMIN_PASSWORD;
 const adminToken =
   process.env.ADMIN_AUTH_TOKEN || crypto.randomBytes(32).toString("hex");
 
-const getActiveTableLabels = async () => {
+const getActiveTables = async () => {
   const { data, error } = await supabase
     .from("tables")
-    .select("label")
+    .select("id,label")
     .eq("is_active", true)
     .order("sort_order", { ascending: true })
     .order("created_at", { ascending: true });
 
   if (error) throw error;
-  return (data ?? []).map((table) => table.label).filter(Boolean);
+  return data ?? [];
 };
 
 const requireAdmin: express.RequestHandler = (req, res, next) => {
@@ -701,7 +701,7 @@ app.get("/orders", requireAdmin, async (_req, res) => {
   try {
     const { data, error } = await supabase
       .from("orders")
-      .select("id,menu_item_id,customer_group_id,quantity,status,created_at,completed_at,cancelled_at,cancel_confirmed_at,staff_called_at,staff_call_confirmed_at,menu_items(name),customer_groups(label,closed_at)")
+      .select("id,menu_item_id,customer_group_id,quantity,status,created_at,completed_at,cancelled_at,cancel_confirmed_at,staff_called_at,staff_call_confirmed_at,menu_items(name),customer_groups(label,table_id,closed_at)")
       .order("created_at", { ascending: false });
 
     if (error) return res.status(500).json({ error: error.message });
@@ -715,7 +715,7 @@ app.get("/staff-calls", requireAdmin, async (_req, res) => {
   try {
     const { data, error } = await supabase
       .from("staff_calls")
-      .select("id,customer_group_id,created_at,confirmed_at,cancelled_at,customer_groups(label)")
+      .select("id,customer_group_id,created_at,confirmed_at,cancelled_at,customer_groups(label,table_id)")
       .is("confirmed_at", null)
       .is("cancelled_at", null)
       .order("created_at", { ascending: false });
@@ -731,7 +731,7 @@ app.get("/staff-calls/:id", async (req, res) => {
   try {
     const { data, error } = await supabase
       .from("staff_calls")
-      .select("id,customer_group_id,created_at,confirmed_at,cancelled_at,customer_groups(label)")
+      .select("id,customer_group_id,created_at,confirmed_at,cancelled_at,customer_groups(label,table_id)")
       .eq("id", req.params.id)
       .single();
 
@@ -798,29 +798,33 @@ app.patch("/staff-calls/:id/cancel", async (req, res) => {
 
 app.get("/customer-groups", async (_req, res) => {
   try {
-    const tableLabels = await getActiveTableLabels();
+    const tables = await getActiveTables();
+    const tableIds = tables.map((table) => table.id);
 
-    if (tableLabels.length === 0) {
+    if (tables.length === 0) {
       return res.json([]);
     }
 
     const { data, error } = await supabase
       .from("customer_groups")
-      .select("id,label,created_at,closed_at,checkout_requested_at")
-      .in("label", tableLabels)
+      .select("id,label,table_id,created_at,closed_at,checkout_requested_at")
+      .in("table_id", tableIds)
       .is("closed_at", null)
       .order("created_at", { ascending: false });
 
     if (error) return res.status(500).json({ error: error.message });
 
-    const activeByLabel = new Map(
-      (data ?? []).map((group) => [group.label, group])
+    const activeByTableId = new Map(
+      (data ?? [])
+        .filter((group) => group.table_id)
+        .map((group) => [group.table_id, group])
     );
 
     res.json(
-      tableLabels.map((label) => ({
-        label,
-        active_group: activeByLabel.get(label) ?? null,
+      tables.map((table) => ({
+        table_id: table.id,
+        label: table.label,
+        active_group: activeByTableId.get(table.id) ?? null,
       }))
     );
   } catch (e) {
@@ -830,22 +834,29 @@ app.get("/customer-groups", async (_req, res) => {
 
 app.post("/customer-groups", async (req, res) => {
   try {
-    const tableLabels = await getActiveTableLabels();
+    const tables = await getActiveTables();
+    const tableId =
+      typeof req.body?.table_id === "string" ? req.body.table_id.trim() : "";
     const rawLabel = typeof req.body?.label === "string" ? req.body.label.trim() : "";
-    const label = rawLabel || tableLabels[0];
 
-    if (tableLabels.length === 0) {
+    if (tables.length === 0) {
       return res.status(400).json({ error: "登録済みの卓がありません" });
     }
 
-    if (!tableLabels.includes(label)) {
+    const table =
+      tables.find((item) => item.id === tableId) ??
+      tables.find((item) => item.label === rawLabel) ??
+      tables[0];
+    const label = rawLabel || table.label;
+
+    if (!table || table.label !== label) {
       return res.status(400).json({ error: "登録されていない卓です" });
     }
 
     const { data: activeGroup, error: activeGroupError } = await supabase
       .from("customer_groups")
-      .select("id,label,created_at,closed_at,checkout_requested_at")
-      .eq("label", label)
+      .select("id,label,table_id,created_at,closed_at,checkout_requested_at")
+      .eq("table_id", table.id)
       .is("closed_at", null)
       .maybeSingle();
 
@@ -856,8 +867,8 @@ app.post("/customer-groups", async (req, res) => {
 
     const { data, error } = await supabase
       .from("customer_groups")
-      .insert([{ label }])
-      .select("id,label,created_at,closed_at,checkout_requested_at")
+      .insert([{ label, table_id: table.id }])
+      .select("id,label,table_id,created_at,closed_at,checkout_requested_at")
       .single();
 
     if (error) return res.status(500).json({ error: error.message });
@@ -873,7 +884,7 @@ app.patch("/customer-groups/:id/checkout", requireAdmin, async (req, res) => {
       .from("customer_groups")
       .update({ closed_at: new Date().toISOString() })
       .eq("id", req.params.id)
-      .select("id,label,created_at,closed_at,checkout_requested_at")
+      .select("id,label,table_id,created_at,closed_at,checkout_requested_at")
       .single();
 
     if (error) return res.status(500).json({ error: error.message });
@@ -890,7 +901,7 @@ app.patch("/customer-groups/:id/request-checkout", async (req, res) => {
       .update({ checkout_requested_at: new Date().toISOString() })
       .eq("id", req.params.id)
       .is("closed_at", null)
-      .select("id,label,created_at,closed_at,checkout_requested_at")
+      .select("id,label,table_id,created_at,closed_at,checkout_requested_at")
       .single();
 
     if (error) return res.status(500).json({ error: error.message });
@@ -905,7 +916,7 @@ app.get("/customer-groups/:id", async (req, res) => {
   try {
     const { data, error } = await supabase
       .from("customer_groups")
-      .select("id,label,created_at,closed_at,checkout_requested_at")
+      .select("id,label,table_id,created_at,closed_at,checkout_requested_at")
       .eq("id", req.params.id)
       .single();
 
@@ -950,7 +961,7 @@ app.get("/orders/:id/status", async (req, res) => {
   try {
     const { data, error } = await supabase
       .from("orders")
-      .select("id,menu_item_id,customer_group_id,quantity,status,created_at,completed_at,cancelled_at,cancel_confirmed_at,staff_called_at,staff_call_confirmed_at,menu_items(name),customer_groups(label,closed_at)")
+      .select("id,menu_item_id,customer_group_id,quantity,status,created_at,completed_at,cancelled_at,cancel_confirmed_at,staff_called_at,staff_call_confirmed_at,menu_items(name),customer_groups(label,table_id,closed_at)")
       .eq("id", req.params.id)
       .single();
 
