@@ -82,6 +82,11 @@ const parseNumberInput = (value: string) => Number(normalizeNumberInput(value));
 const normalizeItemNameInput = (value: string) =>
   value.replace(/\s+/g, "").replace(/　+/g, "").trim();
 
+const getTableOrderPath = (tableId: string) => `/order/table/${tableId}`;
+
+const getQrImageUrl = (url: string) =>
+  `https://api.qrserver.com/v1/create-qr-code/?size=140x140&margin=8&data=${encodeURIComponent(url)}`;
+
 export default function App() {
   const path = window.location.pathname.replace(/\/+$/, "") || "/";
   const tableOrderMatch = path.match(/^\/order\/table\/([^/]+)$/);
@@ -1434,6 +1439,18 @@ const cancelEdit = () => {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setStartingTableId(null);
+    }
+  };
+
+  const getTableOrderUrl = (tableId: string) =>
+    `${window.location.origin}${getTableOrderPath(tableId)}`;
+
+  const copyTableOrderUrl = async (table: DiningTable) => {
+    try {
+      await navigator.clipboard.writeText(getTableOrderUrl(table.id));
+      setCopyMessage(`${table.label}の注文URLをコピーしました`);
+    } catch {
+      setCopyMessage("コピーに失敗しました");
     }
   };
 
@@ -3636,6 +3653,11 @@ const orderSectionHeaderStyle: React.CSSProperties = {
               卓を追加
             </button>
           </div>
+          {copyMessage && (
+            <p style={{ margin: "0 0 12px", color: "#166534", fontSize: 14 }}>
+              {copyMessage}
+            </p>
+          )}
 
           {tables.length === 0 ? (
             <p style={{ margin: 0, color: "#6b7280" }}>
@@ -3646,14 +3668,15 @@ const orderSectionHeaderStyle: React.CSSProperties = {
               {tables.map((table) => {
                 const editing = editingTableId === table.id;
                 const activeGroup = activeCustomerGroupByTableId.get(table.id);
+                const tableOrderUrl = getTableOrderUrl(table.id);
                 return (
                   <div
                     key={table.id}
                     className="table-management-row"
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "minmax(150px, 1fr) 130px auto",
-                      gap: 8,
+                      gridTemplateColumns: "minmax(150px, 1fr) 130px minmax(160px, auto) auto",
+                      gap: 10,
                       alignItems: "center",
                       border: "1px solid #e5e7eb",
                       borderRadius: 8,
@@ -3713,9 +3736,48 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                               ? "注文中"
                               : "空席"}
                         </span>
+                        <div
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "72px minmax(0, 1fr)",
+                            gap: 8,
+                            alignItems: "center",
+                          }}
+                        >
+                          <img
+                            src={getQrImageUrl(tableOrderUrl)}
+                            alt={`${table.label}の注文QRコード`}
+                            width={72}
+                            height={72}
+                            style={{
+                              border: "1px solid #e5e7eb",
+                              borderRadius: 6,
+                              background: "#fff",
+                            }}
+                          />
+                          <div style={{ minWidth: 0 }}>
+                            <p
+                              style={{
+                                margin: 0,
+                                color: "#4b5563",
+                                fontSize: 12,
+                                wordBreak: "break-all",
+                              }}
+                            >
+                              {tableOrderUrl}
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => copyTableOrderUrl(table)}
+                              style={{ marginTop: 6 }}
+                            >
+                              URLコピー
+                            </button>
+                          </div>
+                        </div>
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                           <a
-                            href={`/order/table/${table.id}`}
+                            href={getTableOrderPath(table.id)}
                             style={{
                               ...buttonStyle,
                               minHeight: 0,
