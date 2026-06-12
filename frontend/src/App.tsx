@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { fetchItems, type Item, createItem,deleteItem,updateItem } from "./api/items";
 import { createStockMovement, fetchStockMovements, deleteStockMovement, fetchWasteSummary, type StockMovement, type WasteSummary } from "./api/stockMovements";
 import {
@@ -374,13 +374,23 @@ function CustomerOrderPage({ tableId }: { tableId: string }) {
     window.localStorage.setItem(CUSTOMER_ORDER_IDS_KEY, JSON.stringify(ids));
   };
 
-  const refreshCustomerGroupOptions = async () => {
+  const applyCustomerGroup = useCallback((group: CustomerGroup, label?: string | null) => {
+    window.localStorage.setItem(CUSTOMER_GROUP_ID_KEY, group.id);
+    window.localStorage.removeItem(CUSTOMER_CHECKOUT_REQUESTED_KEY);
+    setError(null);
+    setCustomerGroup(group);
+    setSelectedGroupLabel(label || group.label || "");
+    setPartySizeInput(group.party_size ? String(group.party_size) : "");
+    setCheckoutRequested(false);
+  }, []);
+
+  const refreshCustomerGroupOptions = useCallback(async () => {
     const options = await fetchCustomerGroupOptions();
     setCustomerGroupOptions(options);
     const tableOption = options.find((option) => option.table_id === tableId);
     setSelectedGroupLabel((current) => tableOption?.label || current || options[0]?.label || "");
     return options;
-  };
+  }, [tableId]);
 
   useEffect(() => {
     const loadCustomerGroup = async () => {
@@ -389,16 +399,7 @@ function CustomerOrderPage({ tableId }: { tableId: string }) {
         const tableOption = options.find((option) => option.table_id === tableId);
 
         if (tableOption?.active_group) {
-          window.localStorage.setItem(CUSTOMER_GROUP_ID_KEY, tableOption.active_group.id);
-          window.localStorage.removeItem(CUSTOMER_CHECKOUT_REQUESTED_KEY);
-          setCustomerGroup(tableOption.active_group);
-          setSelectedGroupLabel(tableOption.label);
-          setPartySizeInput(
-            tableOption.active_group.party_size
-              ? String(tableOption.active_group.party_size)
-              : ""
-          );
-          setCheckoutRequested(false);
+          applyCustomerGroup(tableOption.active_group, tableOption.label);
         } else {
           resetCustomerSession();
           return;
@@ -409,15 +410,41 @@ function CustomerOrderPage({ tableId }: { tableId: string }) {
     };
 
     loadCustomerGroup();
-  }, [tableId]);
+  }, [applyCustomerGroup, refreshCustomerGroupOptions, tableId]);
+
+  useEffect(() => {
+    if (customerGroup || checkoutRequested) return;
+
+    let stopped = false;
+    const syncActiveGroup = async () => {
+      try {
+        const options = await refreshCustomerGroupOptions();
+        if (stopped) return;
+        const tableOption = options.find((option) => option.table_id === tableId);
+        if (tableOption?.active_group) {
+          applyCustomerGroup(tableOption.active_group, tableOption.label);
+        }
+      } catch {
+        // 待機中の自動更新なので、一時的な通信失敗では画面を止めない。
+      }
+    };
+
+    const timer = window.setInterval(syncActiveGroup, 3000);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [applyCustomerGroup, checkoutRequested, customerGroup, refreshCustomerGroupOptions, tableId]);
 
   const startCustomerGroup = async () => {
     try {
       setCreatingGroup(true);
       setError(null);
-      const label = selectedGroupLabel || customerGroupOptions[0]?.label || "";
-      const activeGroup = selectedGroupOption?.active_group;
-      if (!selectedGroupOption?.table_id) {
+      const options = await refreshCustomerGroupOptions();
+      const latestGroupOption = options.find((option) => option.table_id === tableId);
+      const label = latestGroupOption?.label || selectedGroupLabel || customerGroupOptions[0]?.label || "";
+      const activeGroup = latestGroupOption?.active_group;
+      if (!latestGroupOption?.table_id) {
         setError("この卓は現在利用できません");
         return;
       }
@@ -429,15 +456,10 @@ function CustomerOrderPage({ tableId }: { tableId: string }) {
         activeGroup ??
         (await createCustomerGroup({
           label,
-          table_id: selectedGroupOption.table_id,
+          table_id: latestGroupOption.table_id,
         }));
-      window.localStorage.setItem(CUSTOMER_GROUP_ID_KEY, group.id);
-      window.localStorage.removeItem(CUSTOMER_CHECKOUT_REQUESTED_KEY);
-      setCustomerGroup(group);
-      setCheckoutRequested(false);
+      applyCustomerGroup(group, label);
       setOrderList([]);
-      setSelectedGroupLabel(group.label ?? "");
-      setPartySizeInput(group.party_size ? String(group.party_size) : "");
       await refreshCustomerGroupOptions();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
