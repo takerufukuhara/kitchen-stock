@@ -386,6 +386,12 @@ export async function requestCustomerGroupCheckout(id: string): Promise<Customer
   });
 }
 
+export async function cancelCustomerGroupCheckoutRequest(id: string): Promise<CustomerGroup> {
+  return request<CustomerGroup>(`/customer-groups/${id}/cancel-checkout-request`, {
+    method: "PATCH",
+  });
+}
+
 export async function updateCustomerGroupPartySize(
   id: string,
   party_size: number

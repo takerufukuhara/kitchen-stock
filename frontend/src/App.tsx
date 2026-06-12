@@ -3,6 +3,7 @@ import { fetchItems, type Item, createItem,deleteItem,updateItem } from "./api/i
 import { createStockMovement, fetchStockMovements, deleteStockMovement, fetchWasteSummary, type StockMovement, type WasteSummary } from "./api/stockMovements";
 import {
   addRecipe,
+  cancelCustomerGroupCheckoutRequest,
   cancelOrder,
   cancelStaffCall,
   checkoutCustomerGroup,
@@ -703,6 +704,20 @@ function CustomerOrderPage({ tableId }: { tableId: string }) {
     }
   };
 
+  const cancelCheckoutRequest = async () => {
+    if (!customerGroup) return;
+
+    try {
+      setError(null);
+      const group = await cancelCustomerGroupCheckoutRequest(customerGroup.id);
+      setCustomerGroup(group);
+      window.localStorage.removeItem(CUSTOMER_CHECKOUT_REQUESTED_KEY);
+      setCheckoutRequested(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   const selectedGroupOption = customerGroupOptions.find(
     (option) => option.table_id === tableId
   );
@@ -763,17 +778,34 @@ function CustomerOrderPage({ tableId }: { tableId: string }) {
             <p style={{ margin: 0, color: "#4b5563", lineHeight: 1.7 }}>
               注文開始画面に戻るには、下のボタンを押してください。
             </p>
-            <button
-              type="button"
-              onClick={resetCustomerSession}
-              style={{
-                ...buttonStyle,
-                width: "fit-content",
-                padding: "8px 14px",
-              }}
-            >
-              注文開始画面に戻る
-            </button>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                onClick={resetCustomerSession}
+                style={{
+                  ...buttonStyle,
+                  width: "fit-content",
+                  padding: "8px 14px",
+                }}
+              >
+                注文開始画面に戻る
+              </button>
+              <button
+                type="button"
+                onClick={cancelCheckoutRequest}
+                style={{
+                  color: "#111827",
+                  backgroundColor: "#fff",
+                  border: "1px solid #9ca3af",
+                  borderRadius: 6,
+                  fontWeight: 700,
+                  padding: "8px 14px",
+                  cursor: "pointer",
+                }}
+              >
+                会計希望を取り消す
+              </button>
+            </div>
           </section>
         )}
         {!checkoutRequested && (
@@ -3023,6 +3055,19 @@ const cancelEdit = () => {
     }
   };
 
+  const cancelCheckoutRequestForGroup = async (groupId: string) => {
+    if (groupId === "no-group") return;
+
+    try {
+      setError(null);
+      await cancelCustomerGroupCheckoutRequest(groupId);
+      await loadOrderData();
+      await loadTableData();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   const applyClosingUsageDiff = async () => {
     if (orderUsageDiffs.length === 0) return;
 
@@ -3952,6 +3997,15 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                               {startingTableId === table.id ? "開始中..." : "注文開始"}
                             </button>
                           )}
+                          {activeGroup?.checkout_requested_at && (
+                            <button
+                              type="button"
+                              onClick={() => cancelCheckoutRequestForGroup(activeGroup.id)}
+                              disabled={loading}
+                            >
+                              会計希望を取り消す
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => startEditTable(table)}
@@ -4038,16 +4092,27 @@ const orderSectionHeaderStyle: React.CSSProperties = {
                       </span>
                     )}
                     {group ? (
-                      <button
-                        onClick={() => checkoutGroup(group.id)}
-                        disabled={loading || !group.checkout_requested_at}
-                        style={{
-                          opacity: loading || !group.checkout_requested_at ? 0.55 : 1,
-                          cursor: loading || !group.checkout_requested_at ? "not-allowed" : "pointer",
-                        }}
-                      >
-                        会計済みにする
-                      </button>
+                      <>
+                        <button
+                          onClick={() => checkoutGroup(group.id)}
+                          disabled={loading || !group.checkout_requested_at}
+                          style={{
+                            opacity: loading || !group.checkout_requested_at ? 0.55 : 1,
+                            cursor: loading || !group.checkout_requested_at ? "not-allowed" : "pointer",
+                          }}
+                        >
+                          会計済みにする
+                        </button>
+                        {group.checkout_requested_at && (
+                          <button
+                            type="button"
+                            onClick={() => cancelCheckoutRequestForGroup(group.id)}
+                            disabled={loading}
+                          >
+                            会計希望を取り消す
+                          </button>
+                        )}
+                      </>
                     ) : (
                       <button
                         type="button"

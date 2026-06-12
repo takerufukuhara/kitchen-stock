@@ -990,6 +990,24 @@ app.patch("/customer-groups/:id/request-checkout", async (req, res) => {
   }
 });
 
+app.patch("/customer-groups/:id/cancel-checkout-request", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("customer_groups")
+      .update({ checkout_requested_at: null })
+      .eq("id", req.params.id)
+      .is("closed_at", null)
+      .select("id,label,table_id,party_size,created_at,closed_at,checkout_requested_at")
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    if (!data) return res.status(404).json({ error: "お客様グループが見つかりません" });
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
 app.patch("/customer-groups/:id/party-size", async (req, res) => {
   try {
     const partySize = Number(req.body?.party_size);
